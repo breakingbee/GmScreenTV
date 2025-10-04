@@ -1,0 +1,20 @@
+﻿<!doctype html>
+<html>
+<head><meta charset="utf-8"/><title>Remote</title>
+<style>
+body{background:#9f9f9f;font-family:sans-serif;}
+.touche{margin:5px;padding:10px;background:#000;color:#fff;font-weight:bold;border:none;}
+.touche:active{background:#444;}
+</style></head>
+<body><center>
+<h3>GmScreen Remote</h3>
+<button class="touche" RcuKey="42">POWER</button>
+<button class="touche" RcuKey="13">1</button>
+<button class="touche" RcuKey="14">2</button>
+<button class="touche" RcuKey="15">3</button>
+</center>
+<script>
+document.querySelectorAll('.touche').forEach(btn=>{
+  btn.onclick=()=>window.NativeBridge && NativeBridge.sendRcuKey(btn.getAttribute('RcuKey'));
+});
+</script></body></html>

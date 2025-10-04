@@ -1,0 +1,27 @@
+﻿plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.example.gmscreentv'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.example.gmscreentv"
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release { minifyEnabled false }
+    }
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.24"
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    implementation "androidx.core:core-ktx:1.13.1"
+}
