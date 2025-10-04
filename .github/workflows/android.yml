@@ -1,7 +1,7 @@
 name: Android CI (debug APK)
 
 on:
-  workflow_dispatch: {}   # run manually from the Actions tab
+  workflow_dispatch: {}
 
 jobs:
   build:
@@ -11,31 +11,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 11
+      # Use JDK 17 for Android SDK tools (sdkmanager needs it)
+      - name: Set up JDK 17 (for SDK tools)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept licenses & install SDK packages (API 30)
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platform-tools" "platforms;android-30" "build-tools;30.0.3"
+
+      # Switch to JDK 11 for the Gradle/AGP 4.2.x build
+      - name: Set up JDK 11 (for Gradle build)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '11'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages (API 30)
-        run: |
-          sdkmanager "platform-tools" "platforms;android-30" "build-tools;30.0.3"
-
-      # Generate Gradle wrapper (since your repo doesn't include it yet)
-      - name: Generate Gradle Wrapper (6.7.1)
+      # Build with a specific Gradle version (no wrapper in repo)
+      - name: Build Debug APK with Gradle 6.7.1
         uses: gradle/gradle-build-action@v3
         with:
           gradle-version: 6.7.1
-          arguments: wrapper
-
-      - name: Make wrapper executable
-        run: chmod +x gradlew
-
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
+          arguments: assembleDebug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
