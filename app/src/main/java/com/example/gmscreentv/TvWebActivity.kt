@@ -149,32 +149,27 @@ class TvWebActivity : Activity() {
             return sb.toString()
         }
 
-        // ===== CONTROL PROTOCOL (experimental pull from STB) =====
-        // We probe common control ports and send framed JSON requests:
-        //   Start00000LENEnd + UTF-8(JSON)
-        // Then try to zlib-inflate the reply and extract channel entries.
+        // ===== CONTROL PROTOCOL (pull from STB) =====
+        // We now parse replies as GCDH + (len,type,extra) + zlib(payload).
         @JavascriptInterface
         fun fetchChannelsFromStb(): String {
             val ip = getStbIp().trim()
             if (ip.isEmpty()) return "[]"
 
-            // candidate ports seen in practice (from your captures/logs patterns)
+            // candidate ports seen in practice
             val ports = intArrayOf(20000, 4113, 8888)
 
-            // candidate requests (match PC app flow)
+            // frames exactly like your PC app’s JsonParser.serialize(...)
             val frames = listOf(
-                jsonFrame("""{"request":"1012"}"""),                            // handshake/info
-                jsonFrame("""{"FromIndex":"0","ToIndex":"199","request":"0"}""") // ask list
+                jsonFrame("""{"request":"1012"}"""),                                // handshake
+                jsonFrame("""{"request":"0","FromIndex":"0","ToIndex":"199"}""")    // list window
             )
 
-            // try each port until one yields channels
             for (port in ports) {
                 try {
                     val chans = talkToControl(ip, port, frames)
                     if (chans.length() > 0) return chans.toString()
-                } catch (_: Exception) {
-                    // try next port
-                }
+                } catch (_: Exception) { }
             }
             return "[]"
         }
@@ -187,19 +182,55 @@ class TvWebActivity : Activity() {
             return prefix + body
         }
 
-        private fun readAllAvailable(`in`: InputStream, waitMs: Long = 600L): ByteArray {
-            val buf = ByteArray(8192)
-            val out = ArrayList<Byte>()
-            val start = System.currentTimeMillis()
-            while (System.currentTimeMillis() - start < waitMs) {
-                val n = try { if (`in`.available() > 0) `in`.read(buf) else -1 } catch (e: Exception) { -1 }
-                if (n != null && n > 0) {
-                    for (i in 0 until n) out.add(buf[i])
-                } else {
-                    try { Thread.sleep(40) } catch (_: Exception) {}
-                }
+        // === NEW: GCDH framing ===
+        private fun readExact(`in`: InputStream, n: Int): ByteArray? {
+            var remaining = n
+            val out = ByteArray(n)
+            var off = 0
+            while (remaining > 0) {
+                val r = try { `in`.read(out, off, remaining) } catch (_: Exception) { -1 }
+                if (r <= 0) return null
+                off += r
+                remaining -= r
             }
-            return out.toByteArray()
+            return out
+        }
+
+        private fun readGcdhFrames(`in`: InputStream, deadlineMs: Long = 1500L): List<ByteArray> {
+            val out = ArrayList<ByteArray>()
+            val end = System.currentTimeMillis() + deadlineMs
+
+            fun beInt(b: ByteArray, o: Int): Int {
+                // ((b[o+3]<<24)|(b[o+2]<<16)|(b[o+1]<<8)|b[o+0]) — matches your SocketReceiveThread
+                return ((b[o+3].toInt() and 0xFF) shl 24) or
+                       ((b[o+2].toInt() and 0xFF) shl 16) or
+                       ((b[o+1].toInt() and 0xFF) shl 8)  or
+                       ( b[o+0].toInt() and 0xFF)
+            }
+
+            while (System.currentTimeMillis() < end) {
+                if (`in`.available() < 16) { try { Thread.sleep(20) } catch (_: Exception) {}; continue }
+
+                val hdr = readExact(`in`, 16) ?: break
+                if (hdr.size != 16) break
+                val isGcdh = hdr[0] == 'G'.code.toByte() &&
+                             hdr[1] == 'C'.code.toByte() &&
+                             hdr[2] == 'D'.code.toByte() &&
+                             hdr[3] == 'H'.code.toByte()
+                if (!isGcdh) break
+
+                val payloadLen = beInt(hdr, 4)   // i
+                // val msgType   = beInt(hdr, 8) // j (not needed now)
+                // val extra     = beInt(hdr,12) // k (not needed)
+
+                if (payloadLen <= 0 || payloadLen > 8 * 1024 * 1024) break
+                val compressed = readExact(`in`, payloadLen) ?: break
+
+                // inflate like GsZilb.UnCompress
+                val inflated = tryInflate(compressed) ?: compressed
+                out += inflated
+            }
+            return out
         }
 
         private fun tryInflate(data: ByteArray): ByteArray? {
@@ -210,7 +241,7 @@ class TvWebActivity : Activity() {
                 val n = inf.inflate(out)
                 inf.end()
                 if (n > 0) out.copyOf(n) else null
-            } catch (e: Exception) { null }
+            } catch (_: Exception) { null }
         }
 
         private fun parseChannelsFromText(text: String, ip: String): JSONArray {
@@ -273,28 +304,17 @@ class TvWebActivity : Activity() {
         private fun talkToControl(ip: String, port: Int, frames: List<ByteArray>): JSONArray {
             var sock: Socket? = null
             return try {
-                sock = Socket(ip, port).apply { soTimeout = 1500 }
+                sock = Socket(ip, port).apply { soTimeout = 2000 }
                 val out: OutputStream = sock.getOutputStream()
                 val `in`: InputStream = sock.getInputStream()
 
                 // send frames
                 frames.forEach { out.write(it); out.flush(); try { Thread.sleep(40) } catch (_: Exception) {} }
 
-                // read reply burst
-                val raw = readAllAvailable(`in`, 900)
-                if (raw.isEmpty()) return JSONArray()
-
-                // try zlib inflate straight
-                val inflated = tryInflate(raw) ?: raw
-
-                // if still opaque, try to locate a zlib stream inside by scanning for 0x78 0x9C or 0x78 0xDA
-                val maybe = if (inflated === raw) {
-                    val idx = raw.indexOfSubsequence(byteArrayOf(0x78.toByte(), 0x9C.toByte()))
-                              .takeIf { it >= 0 } ?: raw.indexOfSubsequence(byteArrayOf(0x78.toByte(), 0xDA.toByte()))
-                    if (idx >= 0) tryInflate(raw.copyOfRange(idx, raw.size)) else null
-                } else null
-
-                val text = String((maybe ?: inflated), Charsets.UTF_8)
+                // read GCDH-framed replies and concatenate text
+                val chunks = readGcdhFrames(`in`, 1800)
+                if (chunks.isEmpty()) return JSONArray()
+                val text = buildString { for (c in chunks) append(String(c, Charsets.UTF_8)) }
 
                 // parse channels
                 parseChannelsFromText(text, ip)
@@ -360,7 +380,7 @@ class TvWebActivity : Activity() {
     }
 }
 
-// small helper: find subsequence
+// small helper: find subsequence (still used elsewhere)
 private fun ByteArray.indexOfSubsequence(needle: ByteArray): Int {
     if (needle.isEmpty()) return 0
     outer@ for (i in 0..this.size - needle.size) {
@@ -369,4 +389,3 @@ private fun ByteArray.indexOfSubsequence(needle: ByteArray): Int {
     }
     return -1
 }
-
