@@ -1,0 +1,12 @@
+[
+  {"name":"Das Erste HD","id":"00020034100001","url":"http://<STB-IP>:8085/player.00020034100001"},
+  {"name":"ZDF HD","id":"00020034100002","url":"http://<STB-IP>:8085/player.00020034100002"},
+  {"name":"RTL Television","id":"00020034100003","url":"http://<STB-IP>:8085/player.00020034100003"},
+  {"name":"SAT.1 NRW","id":"00020039417508","url":"http://<STB-IP>:8085/player.00020039417508"},
+  {"name":"ProSieben","id":"00020034100005","url":"http://<STB-IP>:8085/player.00020034100005"},
+  {"name":"VOX","id":"00020034100006","url":"http://<STB-IP>:8085/player.00020034100006"},
+  {"name":"Kabel Eins","id":"00020034100007","url":"http://<STB-IP>:8085/player.00020034100007"},
+  {"name":"Arte HD","id":"00020034100008","url":"http://<STB-IP>:8085/player.00020034100008"},
+  {"name":"3sat HD","id":"00020034100009","url":"http://<STB-IP>:8085/player.00020034100009"},
+  {"name":"n-tv","id":"00020034100010","url":"http://<STB-IP>:8085/player.00020034100010"}
+]
