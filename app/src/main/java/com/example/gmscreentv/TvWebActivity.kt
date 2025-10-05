@@ -98,7 +98,6 @@ class TvWebActivity : Activity() {
             }
         }
 
-        // Open directly by ID (VLC)
         @JavascriptInterface fun openChannelById(channelId: String) {
             val ip = getStbIp()
             val id = channelId.trim()
@@ -147,10 +146,6 @@ class TvWebActivity : Activity() {
         }
 
         // ========= CONTROL PROTOCOL =========
-        // We capture: satellites, TP map, and services.
-        data class TpInfo(val tpIndex: Int, val satIndex: Int)
-        data class SatInfo(val index: Int, val name: String)
-
         @JavascriptInterface
         fun fetchChannelsFromStb(): String {
             val ip = getStbIp().trim()
@@ -158,12 +153,9 @@ class TvWebActivity : Activity() {
 
             val ports = intArrayOf(20000, 4113, 8888)
             val seq = mutableListOf<ByteArray>()
-
-            // Handshake + list type + ranges (wide)
             seq += jsonFrame("""{"request":"1012"}""")
             seq += jsonFrame("""{"request":"1007","IsFavList":"0","SelectListType":"0"}""")
-            val windows = arrayOf(0 to 199, 200 to 399, 400 to 799)
-            windows.forEach { (a,b) ->
+            arrayOf(0 to 199, 200 to 399, 400 to 799).forEach { (a,b) ->
                 seq += jsonFrame("""{"request":"0","FromIndex":"$a","ToIndex":"$b"}""")
             }
             seq += jsonFrame("""{"request":"26"}""")
@@ -182,7 +174,7 @@ class TvWebActivity : Activity() {
         @JavascriptInterface
         fun getLastDebug(): String = prefs.getString("last_debug", "") ?: ""
 
-        // Switch/tune best-effort by ServiceID (used by UI “Switch”)
+        // Tell STB to tune this ServiceID (best-effort)
         @JavascriptInterface
         fun switchToServiceId(serviceId: String): String {
             val ip = getStbIp().trim()
@@ -190,7 +182,6 @@ class TvWebActivity : Activity() {
 
             val debug = StringBuilder()
             val seq = mutableListOf<ByteArray>()
-            // try a few likely commands; harmless if unknown
             seq += jsonFrame("""{"request":"23","ServiceID":"$serviceId"}""")
             seq += jsonFrame("""{"request":"20","ServiceID":"$serviceId"}""")
             seq += jsonFrame("""{"request":"26"}""")
@@ -198,13 +189,12 @@ class TvWebActivity : Activity() {
             val ports = intArrayOf(20000, 4113, 8888)
             for (p in ports) {
                 try {
-                    talkToControl(ip, p, seq, debug) // we don't need the result list here
+                    talkToControl(ip, p, seq, debug)
                     prefs.edit().putString("last_debug", debug.toString().take(12000)).apply()
                     return "ok"
                 } catch (_: Exception) {}
             }
 
-            // HTTP fallbacks (just in case)
             try { http.newCall(Request.Builder().url("http://$ip/?Play=$serviceId").build()).execute().use { } } catch (_: Exception) {}
             try { http.newCall(Request.Builder().url("http://$ip/?ServiceID=$serviceId").build()).execute().use { } } catch (_: Exception) {}
 
@@ -212,7 +202,6 @@ class TvWebActivity : Activity() {
             return "sent"
         }
 
-        // ===== helpers =====
         private fun jsonFrame(json: String): ByteArray {
             val body = json.trim().toByteArray(Charsets.UTF_8)
             val len = body.size
@@ -294,14 +283,13 @@ class TvWebActivity : Activity() {
             }
         }
 
-        // Parse satellites + TP map + services -> enrich each channel with satIndex/satName when possible
+        // Build satellites map + TP->sat map + services list (adds satIndex/satName when possible)
         private fun parseEverything(all: List<Pair<Int,ByteArray>>, ip: String, debug: StringBuilder): JSONArray {
             val sats = mutableMapOf<Int, String>()       // satIndex -> name
             val tp2sat = mutableMapOf<Int, Int>()        // TPIndex -> satIndex
             val channels = JSONArray()
             val seen = HashSet<String>()
 
-            // pass 1: satellites + TP tables
             for ((_, bytes) in all) {
                 val text = String(bytes, Charsets.UTF_8)
                 if (text.contains("\"SatName\"")) {
@@ -328,11 +316,8 @@ class TvWebActivity : Activity() {
                 }
             }
 
-            // pass 2: services
             for ((_, bytes) in all) {
                 val text = String(bytes, Charsets.UTF_8)
-
-                // JSON array of services
                 if (text.trim().startsWith("[")) {
                     try {
                         val arr = JSONArray(text)
@@ -341,7 +326,7 @@ class TvWebActivity : Activity() {
                             val id = o.optString("ServiceID","")
                             if (id.isEmpty() || !seen.add(id)) continue
                             val name = o.optString("ServiceName", "Channel $id")
-                            val tpIndex = o.optInt("TPIndex", -1) // some firmwares include this
+                            val tpIndex = o.optInt("TPIndex", -1)
                             val satIndex = if (tpIndex >= 0) (tp2sat[tpIndex] ?: -1) else -1
                             val satName = if (satIndex >= 0) (sats[satIndex] ?: "") else ""
                             channels.put(
@@ -357,13 +342,13 @@ class TvWebActivity : Activity() {
                     } catch (_: Exception) {}
                 }
             }
-            // stick satellites list for UI filter
+
             val meta = JSONObject()
             val satArr = JSONArray()
             sats.toSortedMap().forEach { (k,v) -> satArr.put(JSONObject().put("index",k).put("name",v)) }
             meta.put("satellites", satArr)
             if (channels.length() > 0) {
-                (channels as JSONArray).put(JSONObject().put("__meta", meta)) // append a meta marker at end
+                channels.put(JSONObject().put("__meta", meta))
             }
             debug.append("-- sats=${sats.size} tpMap=${tp2sat.size} channels=${channels.length()}\n")
             return channels
