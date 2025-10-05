@@ -22,8 +22,8 @@ class TvWebActivity : Activity() {
     private lateinit var webView: WebView
     private val io = Executors.newFixedThreadPool(16)
     private val http = OkHttpClient.Builder()
-        .connectTimeout(1000, TimeUnit.MILLISECONDS)
-        .readTimeout(1500, TimeUnit.MILLISECONDS)
+        .connectTimeout(1200, TimeUnit.MILLISECONDS)
+        .readTimeout(2000, TimeUnit.MILLISECONDS)
         .build()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,7 +59,7 @@ class TvWebActivity : Activity() {
     inner class NativeBridge(private val ctx: Context) {
         private val prefs get() = ctx.getSharedPreferences("gmscreen", Context.MODE_PRIVATE)
 
-        // ============ BASICS ============
+        // ===== basics =====
         @JavascriptInterface fun setStbIp(ip: String) { prefs.edit().putString("stb_ip", ip.trim()).apply() }
         @JavascriptInterface fun getStbIp(): String = prefs.getString("stb_ip", "") ?: ""
 
@@ -72,13 +72,13 @@ class TvWebActivity : Activity() {
             }
         }
 
-        // ============ PLAYBACK ============
+        // ===== playback =====
         @JavascriptInterface fun openInVlc(url: String) {
             try {
                 val i = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
                     setDataAndType(android.net.Uri.parse(url), "video/*")
                     addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    setPackage("org.videolan.vlc") // prefer VLC
+                    setPackage("org.videolan.vlc")
                 }
                 ctx.startActivity(i)
             } catch (_: Exception) {
@@ -100,13 +100,9 @@ class TvWebActivity : Activity() {
             openInVlc("http://$ip:8085/player.$id")
         }
 
-        // ============ PLAYLIST HELPERS ============
-        @JavascriptInterface fun defaultPlaylistUrl(): String {
-            val ip = getStbIp()
-            return if (ip.isEmpty()) "" else "http://$ip:8085/playlist.m3u"
-        }
+        // ===== playlist helpers =====
 
-        // Try several likely playlist paths on :8085
+        // More robust finder: test candidates and PICK THE ONE THAT HAS LINKS
         @JavascriptInterface
         fun findPlaylistForIp(ip: String): String {
             val candidates = listOf(
@@ -115,15 +111,20 @@ class TvWebActivity : Activity() {
                 "http://$ip:8085/channels.m3u",
                 "http://$ip:8085/all.m3u",
                 "http://$ip:8085/index.m3u",
-                "http://$ip:8085/player.m3u"
+                "http://$ip:8085/player.m3u",
+                "http://$ip:8085/"            // some boxes dump HTML with links here
             )
+            var bestUrl = ""
+            var bestCount = 0
             for (u in candidates) {
-                try {
-                    http.newCall(Request.Builder().url(u).head().build()).execute().use { if (it.isSuccessful) return u }
-                    http.newCall(Request.Builder().url(u).build()).execute().use { if (it.isSuccessful) return u }
-                } catch (_: Exception) {}
+                val cnt = countPlayableLinks(u)
+                if (cnt > bestCount) {
+                    bestCount = cnt
+                    bestUrl = u
+                }
+                if (bestCount >= 5) break // good enough
             }
-            return ""
+            return bestUrl
         }
 
         @JavascriptInterface fun findPlaylistForSavedIp(): String {
@@ -132,7 +133,19 @@ class TvWebActivity : Activity() {
             return findPlaylistForIp(ip)
         }
 
-        // Download+parse M3U/M3U8 to JSON array: [{name,url,id}]
+        // Count how many http://<ip>:8085/player.<id> links we can see at a URL
+        private fun countPlayableLinks(url: String): Int {
+            return try {
+                http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+                    if (!resp.isSuccessful) return 0
+                    val body = resp.body?.string() ?: return 0
+                    Regex("""http://\d{1,3}(?:\.\d{1,3}){3}:8085/player\.(\d+)""")
+                        .findAll(body).count()
+                }
+            } catch (_: Exception) { 0 }
+        }
+
+        // Return JSON items from M3U OR any text/HTML that contains player.<id> links
         @JavascriptInterface fun fetchM3U(url: String): String {
             val items = mutableListOf<Map<String,String>>()
             try {
@@ -140,19 +153,52 @@ class TvWebActivity : Activity() {
                 http.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) return "[]"
                     val body = resp.body?.string() ?: return "[]"
+
+                    var hadExtinf = false
                     var pendingName: String? = null
+
+                    // 1) Parse proper EXTINF M3U
                     body.lineSequence().forEach { raw ->
                         val line = raw.trim()
                         if (line.startsWith("#EXTINF", true)) {
+                            hadExtinf = true
                             val idx = line.indexOf(',')
                             pendingName = if (idx >= 0 && idx+1 < line.length)
                                 line.substring(idx+1).trim() else "Channel"
                         } else if (line.isNotEmpty() && !line.startsWith("#")) {
-                            val urlLine = line
-                            val id = Regex("""player\.([0-9]+)""").find(urlLine)?.groupValues?.getOrNull(1) ?: ""
-                            val name = pendingName ?: urlLine
-                            items += mapOf("name" to name, "url" to urlLine, "id" to id)
-                            pendingName = null
+                            if (line.startsWith("http://") || line.startsWith("https://")) {
+                                val id = Regex("""player\.([0-9]+)""").find(line)?.groupValues?.getOrNull(1) ?: ""
+                                val name = pendingName ?: "Channel ${if (id.isNotEmpty()) id else ""}".trim()
+                                items += mapOf("name" to name, "url" to line, "id" to id)
+                                pendingName = null
+                            }
+                        }
+                    }
+
+                    // 2) If no EXTINF items, fall back to scanning ANY links in the page
+                    if (items.isEmpty() || !hadExtinf) {
+                        val linkRegex = Regex("""http://\d{1,3}(?:\.\d{1,3}){3}:8085/player\.([0-9]+)""")
+                        val seen = HashSet<String>()
+                        linkRegex.findAll(body).forEach { m ->
+                            val id = m.groupValues[1]
+                            val link = m.value
+                            if (seen.add(link)) {
+                                items += mapOf(
+                                    "name" to "Channel $id",
+                                    "url" to link,
+                                    "id" to id
+                                )
+                            }
+                        }
+                        // 3) As an extra fallback: lines that are bare http://... without EXTINF
+                        if (items.isEmpty()) {
+                            body.lineSequence().forEach { raw ->
+                                val t = raw.trim()
+                                if (t.startsWith("http://") || t.startsWith("https://")) {
+                                    val id = Regex("""player\.([0-9]+)""").find(t)?.groupValues?.getOrNull(1) ?: ""
+                                    items += mapOf("name" to if (id.isNotEmpty()) "Channel $id" else t, "url" to t, "id" to id)
+                                }
+                            }
                         }
                     }
                 }
@@ -170,9 +216,14 @@ class TvWebActivity : Activity() {
             return sb.toString()
         }
 
-        // ============ AUTO-DETECT ============
+        @JavascriptInterface fun defaultPlaylistUrl(): String {
+            val ip = getStbIp()
+            return if (ip.isEmpty()) "" else "http://$ip:8085/playlist.m3u"
+        }
 
-        // 1) UDP listener for the beacon your STB sends (UDP/25860)
+        // ===== auto-detect =====
+
+        // UDP/25860 listener (from your capture)
         @JavascriptInterface
         fun discoverUdp25860(timeoutMs: Int): String {
             val found = linkedSetOf<String>()
@@ -192,7 +243,6 @@ class TvWebActivity : Activity() {
                         val ip = pkt.address?.hostAddress ?: continue
                         found += ip
                     } catch (_: java.net.SocketTimeoutException) {
-                        // continue until timeout
                     } catch (_: Exception) { break }
                 }
             } catch (_: Exception) {
@@ -215,7 +265,7 @@ class TvWebActivity : Activity() {
             return sb.toString()
         }
 
-        // 2) HTTP sweep fallback for :8085 (in case UDP is blocked)
+        // HTTP sweep fallback on :8085
         @JavascriptInterface
         fun discoverStb(maxHosts: Int): String {
             val results = mutableListOf<Map<String,String>>()
@@ -223,12 +273,11 @@ class TvWebActivity : Activity() {
             val total = min(maxHosts.coerceAtLeast(1), 254)
 
             fun probe(ip: String): Map<String,String>? {
-                // root
+                // try root
                 try {
-                    http.newCall(Request.Builder().url("http://$ip:8085/").head().build())
-                        .execute().use { if (it.isSuccessful) return mapOf("ip" to ip, "name" to "STB :8085", "playlist" to "") }
+                    http.newCall(Request.Builder().url("http://$ip:8085/").build())
+                        .execute().use { if (it.isSuccessful) return mapOf("ip" to ip, "name" to "STB :8085", "playlist" to findPlaylistForIp(ip)) }
                 } catch (_: Exception) {}
-                // playlist guesses
                 val p = findPlaylistForIp(ip)
                 return if (p.isNotEmpty()) mapOf("ip" to ip, "name" to "STB :8085", "playlist" to p) else null
             }
@@ -247,16 +296,15 @@ class TvWebActivity : Activity() {
             results.forEachIndexed { i, m ->
                 if (i > 0) sb.append(',')
                 sb.append("{\"ip\":").append(JSONObject.quote(m["ip"] ?: ""))
-                  .append(",\"name\":").append(JSONObject.quote(m["name"] ?: ""))
-                  .append(",\"playlist\":").append(JSONObject.quote(m["playlist"] ?: ""))
-                  .append("}")
+                    .append(",\"name\":").append(JSONObject.quote(m["name"] ?: ""))
+                    .append(",\"playlist\":").append(JSONObject.quote(m["playlist"] ?: ""))
+                    .append("}")
             }
             sb.append("]")
             return sb.toString()
         }
 
         private fun localSubnetPrefix(): String? {
-            // returns "192.168.1" for 192.168.1.x
             try {
                 val ifaces = NetworkInterface.getNetworkInterfaces()
                 for (ni in ifaces) {
