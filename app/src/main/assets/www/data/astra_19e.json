@@ -1,0 +1,79 @@
+[
+  {
+    "ServiceID": "00020037628230",
+    "ServiceName": "MDR Thüringen",
+    "ServiceIndex": 1300,
+    "HD": 0,
+    "Scramble": 0,
+    "VideoPID": 2901,
+    "AudioArray": [{"PID": 2902}, {"PID": 2903}],
+    "PMTPID": 3000,
+    "url": "http://192.168.1.206:8085/player.00020037628230"
+  },
+  {
+    "ServiceID": "00020032010354",
+    "ServiceName": "MDR Thüringen HD",
+    "ServiceIndex": 1301,
+    "HD": 1,
+    "Scramble": 0,
+    "VideoPID": 5331,
+    "AudioArray": [{"PID": 5332}, {"PID": 5333}],
+    "PMTPID": 5340,
+    "url": "http://192.168.1.206:8085/player.00020032010354"
+  },
+  {
+    "ServiceID": "00030059400011",
+    "ServiceName": "Medi1 TV",
+    "ServiceIndex": 1302,
+    "HD": 0,
+    "Scramble": 0,
+    "VideoPID": 1101,
+    "AudioArray": [{"PID": 1102}],
+    "PMTPID": 1100,
+    "url": "http://192.168.1.206:8085/player.00030059400011"
+  },
+  {
+    "ServiceID": "00040022500001",
+    "ServiceName": "SSC 1 HD",
+    "ServiceIndex": 1804,
+    "HD": 1,
+    "Scramble": 0,
+    "VideoPID": 801,
+    "AudioArray": [{"PID": 802}, {"PID": 803}],
+    "PMTPID": 800,
+    "url": "http://192.168.1.206:8085/player.00040022500001"
+  },
+  {
+    "ServiceID": "00020037420008",
+    "ServiceName": "SAT.1 HH/SH",
+    "ServiceIndex": 1700,
+    "HD": 0,
+    "Scramble": 0,
+    "VideoPID": 2047,
+    "AudioArray": [{"PID": 2048}],
+    "PMTPID": 103,
+    "url": "http://192.168.1.206:8085/player.00020037420008"
+  },
+  {
+    "ServiceID": "00020039417508",
+    "ServiceName": "SAT.1 NRW",
+    "ServiceIndex": 1701,
+    "HD": 0,
+    "Scramble": 0,
+    "VideoPID": 255,
+    "AudioArray": [{"PID": 256}],
+    "PMTPID": 104,
+    "url": "http://192.168.1.206:8085/player.00020039417508"
+  },
+  {
+    "ServiceID": "00000007007318",
+    "ServiceName": "Test Channel",
+    "ServiceIndex": 1900,
+    "HD": 1,
+    "Scramble": 0,
+    "VideoPID": 7350,
+    "AudioArray": [{"PID": 7351}],
+    "PMTPID": 117,
+    "url": "http://192.168.1.206:8085/player.00000007007318"
+  }
+]
