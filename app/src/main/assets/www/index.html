@@ -2,154 +2,184 @@
 <html>
 <head>
 <meta charset="utf-8"/>
-<title>GmScreen Remote</title>
+<title>GM Screen – Offline Satellite List</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
 <style>
-  body{background:#9f9f9f;margin:0;font-family:Arial,Helvetica,sans-serif}
-  h2{margin:20px 0 8px;text-align:center}
-  .row{display:flex;justify-content:center;flex-wrap:wrap;margin:6px 0}
-  .btn{margin:6px;padding:10px 14px;background:#000;color:#fff;font-weight:bold;border:none;border-radius:6px;min-width:56px;font-size:16px}
-  .btn:focus{outline:2px solid #ffcc00}
-  .btn:active{transform:translateY(2px)}
-  .tiny{min-width:46px;font-size:14px;padding:8px 10px}
-  #ip{font-size:12px;color:#222;text-align:center;margin-top:6px}
-  #list{max-height:46vh;overflow:auto;width:92%;max-width:1000px}
-  .item{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#eee;margin:6px 0;border-radius:6px}
-  .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%}
-  input.txt{min-width:360px;padding:10px;border-radius:6px;border:1px solid #999}
-  .device{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#e8f0ff;margin:6px 0;border-radius:6px;width:92%;max-width:1000px}
-  .mono{font-family:monospace;font-size:12px;color:#222;white-space:pre-wrap;max-height:24vh;overflow:auto;background:#f8f8f8;border:1px solid #ccc;border-radius:6px;padding:6px}
+  :root { --bg:#121417; --card:#1b1f24; --muted:#8fa0b3; --accent:#3fa9ff; --txt:#e6edf3; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  header{padding:14px 16px;border-bottom:1px solid #26303a;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{font-size:18px;margin:0}
+  header .ip{margin-left:auto;font-size:12px;color:var(--muted)}
+  main{display:grid;grid-template-columns:280px 1fr;gap:12px;padding:12px}
+  @media (max-width:900px){ main{grid-template-columns:1fr} }
+  .panel{background:var(--card);border:1px solid #26303a;border-radius:10px;overflow:hidden}
+  .panel h2{margin:0;padding:12px 14px;border-bottom:1px solid #26303a;font-size:14px;color:#bcd0e0}
+  .panel .body{padding:10px 12px}
+  .list{display:flex;flex-direction:column;gap:8px;max-height:70vh;overflow:auto}
+  .sat,.chan{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid #2a3642;background:#171b20;border-radius:8px}
+  .sat:hover,.chan:hover{border-color:#334454}
+  .title{font-weight:600}
+  .sub{font-size:12px;color:var(--muted)}
+  .btn{appearance:none;border:1px solid #2e3b47;background:#0f6fca;color:#fff;padding:8px 12px;border-radius:8px;font-weight:600;cursor:pointer}
+  .btn:active{transform:translateY(1px)}
+  .ghost{background:#0e151b;border-color:#2a3642;color:#c7d6e6}
+  .danger{background:#c92c2c;border-color:#c92c2c}
+  .toolbar{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+  input[type="search"]{width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2a3642;background:#0f141a;color:var(--txt)}
+  .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;font-size:12px;color:#aabbd0}
+  .hint{color:var(--muted);font-size:12px;margin-top:6px}
 </style>
 </head>
 <body>
-  <h2>GmScreen Remote</h2>
+<header>
+  <h1>GM Screen</h1>
+  <button class="btn ghost" id="btnChangeIp" title="Used when building stream URLs">Change IP</button>
+  <div class="ip" id="ipBox">IP: —</div>
+</header>
 
-  <div class="row"><button class="btn" id="btnScan">Auto-detect STB</button></div>
-  <div class="row"><div id="devices"></div></div>
+<main>
+  <!-- Left: Satellites -->
+  <section class="panel" id="satPanel">
+    <h2>Satellites (offline)</h2>
+    <div class="body">
+      <div class="list" id="satList"></div>
+      <div class="hint">This list comes from <span class="mono">/assets/www/data/satellites.json</span>.</div>
+    </div>
+  </section>
 
-  <div class="row">
-    <button class="btn" data-key="42">POWER</button>
-    <button class="btn" data-key="13">1</button>
-    <button class="btn" data-key="14">2</button>
-    <button class="btn" data-key="15">3</button>
-  </div>
-
-  <div class="row">
-    <button class="btn" id="btnFetch">Fetch channels (aggressive)</button>
-    <button class="btn" id="btnLocal">Load local channel list</button>
-    <span id="fetchInfo" class="mono" style="margin:10px;"></span>
-  </div>
-
-  <div class="row">
-    <input id="chanId" class="txt" placeholder="Channel ID (e.g., 22621080)">
-    <button class="btn" id="btnPlayById">Play in VLC</button>
-  </div>
-
-  <div class="row"><div id="chanCount" style="margin:6px 0;"></div></div>
-  <div class="row"><div id="list"></div></div>
-
-  <div class="row"><button class="btn tiny" id="btnShowDebug">Show last debug</button></div>
-  <div class="row"><div id="debug" class="mono" style="display:none"></div></div>
-
-  <div class="row"><button id="changeIp" class="btn">Change IP</button></div>
-  <div id="ip"></div>
+  <!-- Right: Channels -->
+  <section class="panel">
+    <h2 id="chanHeader">Channels</h2>
+    <div class="body">
+      <div class="toolbar">
+        <input id="searchBox" type="search" placeholder="Search channel name or ServiceID…"/>
+        <button class="btn ghost" id="btnClear">Clear</button>
+      </div>
+      <div class="list" id="chanList"></div>
+      <div id="chanInfo" class="hint"></div>
+    </div>
+  </section>
+</main>
 
 <script>
-(function(){
-  function sendKey(k){ try{ if(window.NativeBridge){ NativeBridge.sendRcuKey(String(k)); } }catch(e){} }
-  document.querySelectorAll('.btn[data-key]').forEach(b=> b.onclick=()=>sendKey(b.getAttribute('data-key')) );
+(() => {
+  // ---------- Helpers ----------
+  const q = s => document.querySelector(s);
+  const el = (tag, cls) => { const e=document.createElement(tag); if(cls) e.className=cls; return e; };
 
-  function getIp(){ try{ return NativeBridge.getStbIp(); }catch(e){ return ""; } }
-  function setIp(newIp){ try{ NativeBridge.setStbIp(newIp); }catch(e){} }
+  function getIp(){
+    try { return (window.NativeBridge && NativeBridge.getStbIp()) || ""; }
+    catch(_) { return ""; }
+  }
+  function setIp(ip){
+    try { if(window.NativeBridge) NativeBridge.setStbIp(ip); } catch(_){}
+    renderIp();
+  }
   function renderIp(){
-    var s = getIp();
-    document.getElementById('ip').textContent = s ? ("Current STB IP: "+s) : "No STB IP set";
-  }
-  document.getElementById('changeIp').onclick = function(){
-    var cur = getIp() || "";
-    var ip = prompt("Enter STB IP", cur);
-    if(ip){ setIp(ip); alert("Saved: "+ip); renderIp(); }
-  };
-  renderIp();
-
-  function row(name, id, url){
-    var div = document.createElement('div'); div.className='item';
-    var left = document.createElement('div'); left.className='name';
-    left.textContent = name + (id ? ("  ["+id+"]") : "");
-    var play = document.createElement('button'); play.className='btn tiny'; play.textContent='Play';
-    play.onclick = function(){ try{ NativeBridge.openInVlc(url); }catch(e){} };
-    div.appendChild(left); div.appendChild(play);
-    return div;
-  }
-  function renderList(arr){
-    var list = document.getElementById('list'); list.innerHTML='';
-    document.getElementById('chanCount').textContent = "Channels: " + arr.length;
-    arr.forEach(it => list.appendChild(row(it.name||'Channel', it.id||'', it.url)));
+    const ip = getIp();
+    q('#ipBox').textContent = 'IP: ' + (ip || '— not set');
   }
 
-  document.getElementById('btnPlayById').onclick = function(){
-    var id = (document.getElementById('chanId').value||"").trim();
-    if(!id){ alert("Enter a channel ID, e.g., 22621080"); return; }
-    try{ NativeBridge.openChannelById(id); }catch(e){}
-  };
-
-  // === fetch from STB ===
-  document.getElementById('btnFetch').onclick = function(){
-    document.getElementById('fetchInfo').textContent = "Requesting...";
-    setTimeout(function(){
-      try{
-        var json = NativeBridge.fetchChannelsFromStb();
-        var arr = []; try { arr = JSON.parse(json); } catch(e){}
-        renderList(arr);
-        if (arr.length) {
-          document.getElementById('fetchInfo').textContent = "OK";
-        } else {
-          document.getElementById('fetchInfo').textContent = "No channels (see Debug)";
-          document.getElementById('debug').style.display='block';
-          document.getElementById('debug').textContent = NativeBridge.getLastDebug();
-        }
-      }catch(e){
-        document.getElementById('fetchInfo').textContent = "Failed";
-      }
-    }, 10);
-  };
-
-  // === Load local list from channels_data.json ===
-  document.getElementById('btnLocal').onclick = function(){
-    fetch("channels_data.json").then(r=>r.json()).then(arr=>{
-      renderList(arr);
-      document.getElementById('fetchInfo').textContent = "Loaded Astra 19.2°E local channels";
-    }).catch(e=>{
-      alert("Failed to load local channel list: "+e);
-    });
-  };
-
-  document.getElementById('btnShowDebug').onclick = function(){
-    var box = document.getElementById('debug');
-    box.style.display='block';
-    box.textContent = NativeBridge.getLastDebug();
-  };
-
-  document.getElementById('btnScan').onclick = function(){
-    var box = document.getElementById('devices'); box.innerHTML = 'Listening for UDP beacons...';
-    try{
-      var udpJson = NativeBridge.discoverUdp25860(3000);
-      var arr = []; try { arr = JSON.parse(udpJson); } catch(e){}
-      box.innerHTML = '';
-      if (arr.length) { arr.forEach(it => box.appendChild(deviceRow(it.ip, it.name))); return; }
-      box.textContent = 'No devices via UDP.';
-    }catch(e){
-      box.textContent = 'Scan failed.';
+  // Play helper: prefer explicit URL in JSON; else build from IP + ServiceID.
+  function playChannel(item){
+    const ip = getIp();
+    const url = item.url || (ip ? `http://${ip}:8085/player.${item.ServiceID}` : "");
+    if(!url){
+      alert("No URL and no IP set.\nSet your STB IP to build URLs like http://<ip>:8085/player.<ServiceID>.");
+      return;
     }
+    try {
+      if (window.NativeBridge) NativeBridge.openInVlc(url);
+      else window.open(url, "_blank");
+    } catch(e){}
+  }
+
+  // ---------- Loaders ----------
+  const DATA_ROOT = "data";
+  async function loadJson(relPath){
+    const url = `${DATA_ROOT}/${relPath}`; // served from file:///android_asset/www/
+    const res = await fetch(url);
+    if(!res.ok) throw new Error(`Failed to load ${relPath}: ${res.status}`);
+    return await res.json();
+  }
+
+  // satellites.json -> render list
+  async function loadSatellites(){
+    const satList = q('#satList'); satList.innerHTML = '';
+    try{
+      const sats = await loadJson('satellites.json');
+      sats.forEach(s => {
+        const row = el('div','sat');
+        const left = el('div');
+        const t = el('div','title'); t.textContent = s.name || s.id;
+        const d = el('div','sub'); d.textContent = s.description || s.file;
+        left.appendChild(t); left.appendChild(d);
+        const btn = el('button','btn'); btn.textContent = 'Open';
+        btn.onclick = () => loadChannelsForSatellite(s);
+        row.append(left, btn);
+        satList.appendChild(row);
+      });
+      if (sats.length) loadChannelsForSatellite(sats[0]); // auto-open first
+    }catch(err){
+      satList.innerHTML = `<div class="hint">Could not load satellites.json<br><span class="mono">${err}</span></div>`;
+    }
+  }
+
+  // astra_19e.json (etc) -> render channels
+  let currentChannels = [];
+  async function loadChannelsForSatellite(sat){
+    q('#chanHeader').textContent = `Channels – ${sat.name || sat.id}`;
+    q('#chanList').innerHTML = 'Loading…';
+    q('#chanInfo').textContent = '';
+    try{
+      const arr = await loadJson(sat.file);
+      currentChannels = Array.isArray(arr) ? arr : [];
+      renderChannels(currentChannels);
+      q('#chanInfo').textContent = `${currentChannels.length} channels`;
+    }catch(err){
+      q('#chanList').innerHTML = `<div class="hint">Failed to load <span class="mono">${sat.file}</span><br><span class="mono">${err}</span></div>`;
+    }
+  }
+
+  // render + search
+  function renderChannels(list){
+    const box = q('#chanList'); box.innerHTML = '';
+    list.forEach(item => {
+      const row = el('div','chan');
+      const left = el('div');
+      const t = el('div','title'); t.textContent = item.ServiceName || 'Channel';
+      const s = el('div','sub');  s.textContent = `${item.ServiceID || ''}${item.HD ? ' · HD':''}`;
+      left.append(t, s);
+      const btn = el('button','btn'); btn.textContent = 'Play';
+      btn.onclick = () => playChannel(item);
+      row.append(left, btn);
+      box.appendChild(row);
+    });
+  }
+
+  q('#searchBox').addEventListener('input', e => {
+    const term = e.target.value.trim().toLowerCase();
+    if (!term) { renderChannels(currentChannels); return; }
+    const filtered = currentChannels.filter(ch =>
+      (ch.ServiceName||'').toLowerCase().includes(term) ||
+      (ch.ServiceID||'').toLowerCase().includes(term)
+    );
+    renderChannels(filtered);
+    q('#chanInfo').textContent = `${filtered.length} / ${currentChannels.length} shown`;
+  });
+  q('#btnClear').onclick = () => { q('#searchBox').value=''; renderChannels(currentChannels); q('#chanInfo').textContent = `${currentChannels.length} channels`; };
+
+  // IP controls
+  q('#btnChangeIp').onclick = () => {
+    const cur = getIp() || "";
+    const val = prompt("Enter your STB IP (used to build http://IP:8085/player.<ServiceID>)", cur);
+    if (val) setIp(val.trim());
   };
 
-  function deviceRow(ip, name){
-    var div = document.createElement('div'); div.className='device';
-    var left = document.createElement('div'); left.textContent = (name||'STB') + "  ("+ip+")";
-    var btn = document.createElement('button'); btn.className='btn tiny'; btn.textContent='Connect';
-    btn.onclick = function(){ setIp(ip); alert("Connected to: "+ip); renderIp(); };
-    div.appendChild(left); div.appendChild(btn);
-    return div;
-  }
+  // boot
+  renderIp();
+  loadSatellites();
 })();
 </script>
 </body>
