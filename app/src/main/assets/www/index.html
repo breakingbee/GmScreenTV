@@ -12,21 +12,19 @@
   .btn:active{transform:translateY(2px)}
   .tiny{min-width:46px;font-size:14px;padding:8px 10px}
   #ip{font-size:12px;color:#222;text-align:center;margin-top:6px}
-  #list{max-height:50vh;overflow:auto}
+  #list{max-height:50vh;overflow:auto;width:92%;max-width:1000px}
   .item{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#eee;margin:6px 0;border-radius:6px}
   .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%}
   input.txt{min-width:360px;padding:10px;border-radius:6px;border:1px solid #999}
-  .device{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#e8f0ff;margin:6px 0;border-radius:6px}
+  .device{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#e8f0ff;margin:6px 0;border-radius:6px;width:92%;max-width:1000px}
 </style>
 </head>
 <body>
   <h2>GmScreen Remote</h2>
 
   <!-- Auto-detect -->
-  <div class="row">
-    <button class="btn" id="btnScan">Auto-detect STB</button>
-  </div>
-  <div class="row"><div id="devices" style="width:92%;max-width:1000px;"></div></div>
+  <div class="row"><button class="btn" id="btnScan">Auto-detect STB</button></div>
+  <div class="row"><div id="devices"></div></div>
 
   <!-- Minimal remote -->
   <div class="row">
@@ -44,17 +42,15 @@
 
   <!-- Playlist -->
   <div class="row">
-    <input id="plist" class="txt" placeholder="Playlist URL (e.g., http://<STB_IP>:8085/playlist.m3u)">
+    <input id="plist" class="txt" placeholder="Playlist URL (auto-tries best path on :8085)">
     <button class="btn" id="btnFindPl">Find playlist</button>
     <button class="btn" id="btnLoad">Load channels</button>
   </div>
   <div class="row"><div id="chanCount" style="margin:6px 0;"></div></div>
-  <div class="row"><div id="list" style="width:92%;max-width:1000px;"></div></div>
+  <div class="row"><div id="list"></div></div>
 
   <!-- Change IP -->
-  <div class="row">
-    <button id="changeIp" class="btn">Change IP</button>
-  </div>
+  <div class="row"><button id="changeIp" class="btn">Change IP</button></div>
   <div id="ip"></div>
 
 <script>
@@ -71,8 +67,9 @@
     document.getElementById('ip').textContent = s ? ("Current STB IP: "+s) : "No STB IP set";
     try{
       var el = document.getElementById('plist');
-      if (el && (!el.value || !el.value.trim()) && window.NativeBridge && NativeBridge.defaultPlaylistUrl) {
-        el.value = NativeBridge.defaultPlaylistUrl();
+      if (el && (!el.value || !el.value.trim())) {
+        var best = NativeBridge.findPlaylistForSavedIp();
+        el.value = best || NativeBridge.defaultPlaylistUrl();
       }
     }catch(e){}
   }
@@ -100,25 +97,36 @@
     div.appendChild(left); div.appendChild(play);
     return div;
   }
-  document.getElementById('btnLoad').onclick = function(){
-    var url = (document.getElementById('plist').value||"").trim();
-    if(!url){ alert("Enter playlist URL"); return; }
+
+  function loadListFrom(url){
     try{
       var data = JSON.parse(NativeBridge.fetchM3U(url));
       var list = document.getElementById('list'); list.innerHTML='';
       document.getElementById('chanCount').textContent = "Channels: " + data.length;
       data.forEach(it => list.appendChild(row(it.name||'Channel', it.id||'', it.url)));
+      if (!data.length) alert("No channels found at:\n"+url+"\nTry Find playlist, or Play by Channel ID.");
     }catch(e){
-      alert("Failed to load playlist");
+      alert("Failed to load playlist.");
     }
+  }
+
+  document.getElementById('btnLoad').onclick = function(){
+    var url = (document.getElementById('plist').value||"").trim();
+    if(!url){ alert("Enter or find a playlist URL first."); return; }
+    loadListFrom(url);
   };
 
-  // Find playlist for saved IP
+  // Find playlist (robust)
   document.getElementById('btnFindPl').onclick = function(){
     try{
-      var u = NativeBridge.findPlaylistForSavedIp();
-      if (u){ document.getElementById('plist').value = u; alert("Found playlist:\n"+u); }
-      else { alert("No common playlist found on :8085.\nYou can still play by Channel ID or paste a known playlist URL."); }
+      var best = NativeBridge.findPlaylistForSavedIp();
+      if (best){
+        document.getElementById('plist').value = best;
+        alert("Found playlist:\n"+best);
+        loadListFrom(best);
+      }else{
+        alert("No playlist page with links found on :8085.\nYou can still Play by Channel ID.");
+      }
     }catch(e){ alert("Failed to check playlist."); }
   };
 
