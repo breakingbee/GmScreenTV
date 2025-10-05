@@ -7,6 +7,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.widget.Toast
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -69,17 +70,11 @@ class TvWebActivity : Activity() {
         @JavascriptInterface fun setStbIp(ip: String) { prefs.edit().putString("stb_ip", ip.trim()).apply() }
         @JavascriptInterface fun getStbIp(): String = prefs.getString("stb_ip", "") ?: ""
 
-        @JavascriptInterface fun sendRcuKey(key: String) {
-            val ip = getStbIp()
-            if (ip.isEmpty()) { promptForIp(); return }
-            val url = "http://$ip/?RcuKey=$key"
-            io.execute { try { http.newCall(Request.Builder().url(url).build()).execute().use { } } catch (_: Exception) {} }
-        }
-
         // ===== PLAYBACK =====
-        @JavascriptInterface fun openInVlc(url: String) {
+        @JavascriptInterface
+        fun openInVlc(url: String) {
+            // STRICT VLC only. If VLC missing, just show a toast.
             try {
-                // Prefer VLC; if missing, prompt user instead of opening inside WebView.
                 val i = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
                     setDataAndType(android.net.Uri.parse(url), "video/*")
                     addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -87,21 +82,51 @@ class TvWebActivity : Activity() {
                 }
                 ctx.startActivity(i)
             } catch (_: Exception) {
-                try {
-                    val i2 = android.content.Intent(
-                        android.content.Intent.ACTION_VIEW,
-                        android.net.Uri.parse("market://details?id=org.videolan.vlc")
-                    ).apply { addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK) }
-                    ctx.startActivity(i2)
-                } catch (_: Exception) { }
+                Toast.makeText(ctx, "Install VLC to play streams.", Toast.LENGTH_LONG).show()
             }
         }
 
-        @JavascriptInterface fun openChannelById(channelId: String) {
+        @JavascriptInterface
+        fun openChannelById(channelId: String) {
             val ip = getStbIp()
             val id = channelId.trim()
             if (ip.isEmpty() || id.isEmpty()) return
             openInVlc("http://$ip:8085/player.$id")
+        }
+
+        // New: tune STB to ServiceID first, then open in VLC
+        @JavascriptInterface
+        fun tuneAndPlay(serviceId: String, serviceIndex: Int) {
+            val ip = getStbIp().trim()
+            if (ip.isEmpty() || serviceId.isEmpty()) return
+
+            io.execute {
+                // 1) Try control-socket “zap by ServiceID” (we’ll send several likely verbs; STB ignores unknown ones)
+                val tries = listOf(
+                    """{"request":"1001","ServiceID":"$serviceId"}""",
+                    """{"request":"1010","ServiceID":"$serviceId"}""",
+                    """{"request":"1011","ServiceID":"$serviceId"}"""
+                ).map { jsonFrame(it) }
+
+                var tuned = false
+                val debug = StringBuilder()
+                for (port in intArrayOf(20000, 4113, 8888)) {
+                    try {
+                        tuned = sendControlSequence(ip, port, tries, debug)
+                        if (tuned) break
+                    } catch (_: Exception) { }
+                }
+
+                // 2) Fallback: send RC digits for ServiceIndex (if provided)
+                if (!tuned && serviceIndex >= 0) {
+                    try { sendNumberAsRcu(serviceIndex) } catch (_: Exception) {}
+                }
+
+                // 3) Small wait, then VLC
+                try { Thread.sleep(700) } catch (_: Exception) {}
+                val url = "http://$ip:8085/player.$serviceId"
+                webView.post { openInVlc(url) }
+            }
         }
 
         // ===== AUTO-DETECT (UDP 25860) =====
@@ -139,8 +164,7 @@ class TvWebActivity : Activity() {
             return sb.toString()
         }
 
-        // ========= CONTROL PROTOCOL =========
-        // GCDH header + (maybe) zlib payloads. Keep socket open ~12s to collect everything.
+        // ========= CONTROL PROTOCOL (fetch) =========
         @JavascriptInterface
         fun fetchChannelsFromStb(): String {
             val ip = getStbIp().trim()
@@ -149,23 +173,23 @@ class TvWebActivity : Activity() {
             val ports = intArrayOf(20000, 4113, 8888)
 
             val seq = mutableListOf<ByteArray>()
-            // 1) handshake/info
+            // handshake/info
             seq += jsonFrame("""{"request":"1012"}""")
-            // 2) list type: TV, non-fav
+            // list type: TV, non-fav
             seq += jsonFrame("""{"request":"1007","IsFavList":"0","SelectListType":"0"}""")
-            // 3) several windows; some firmwares only push after windows are requested
+            // wide windows (we dedupe by ServiceID)
             val windows = arrayOf(
                 0 to 199, 200 to 399, 400 to 799,
                 800 to 1199, 1200 to 1599, 1600 to 2199
             )
             windows.forEach { (a,b) -> seq += jsonFrame("""{"request":"0","FromIndex":"$a","ToIndex":"$b"}""") }
-            // 4) heartbeat (some boxes wait for this before dumping lists)
+            // heartbeat
             seq += jsonFrame("""{"request":"26"}""")
 
             val combinedDebug = StringBuilder()
             for (port in ports) {
                 try {
-                    val res = talkToControl(ip, port, seq, combinedDebug, listenMillis = 12000L) // <-- long listen
+                    val res = talkToControl(ip, port, seq, combinedDebug, listenMillis = 12000L)
                     if (res.length() > 0) return res.toString()
                 } catch (_: Exception) { }
             }
@@ -174,6 +198,39 @@ class TvWebActivity : Activity() {
         }
 
         @JavascriptInterface fun getLastDebug(): String = prefs.getString("last_debug", "") ?: ""
+
+        // ==== helpers ====
+        private fun sendNumberAsRcu(num: Int) {
+            val map = mapOf('1' to 13, '2' to 14, '3' to 15, '4' to 16, '5' to 17,
+                            '6' to 18, '7' to 19, '8' to 20, '9' to 21, '0' to 22)
+            val s = num.toString()
+            for (ch in s) {
+                val code = map[ch] ?: continue
+                val url = "http://${getStbIp()}/?RcuKey=$code"
+                try { http.newCall(Request.Builder().url(url).build()).execute().use { } } catch (_: Exception) {}
+                try { Thread.sleep(120) } catch (_: Exception) {}
+            }
+            // optional: OK/ENTER (adjust if your STB needs a different keycode)
+            val enterCode = 11
+            val enterUrl = "http://${getStbIp()}/?RcuKey=$enterCode"
+            try { http.newCall(Request.Builder().url(enterUrl).build()).execute().use { } } catch (_: Exception) {}
+        }
+
+        private fun sendControlSequence(ip: String, port: Int, frames: List<ByteArray>, debug: StringBuilder): Boolean {
+            var sock: Socket? = null
+            return try {
+                debug.append("Tune attempt $ip:$port\n")
+                sock = Socket(ip, port).apply { soTimeout = 2200 }
+                val out: OutputStream = sock.getOutputStream()
+                val `in`: InputStream = sock.getInputStream()
+                for (f in frames) { out.write(f); out.flush(); try { Thread.sleep(40) } catch (_: Exception) {} }
+                // read a little so STB processes; success not guaranteed, but this gives it time
+                readGcdhFrames(`in`, totalWaitMs = 600L, debug)
+                true
+            } catch (_: Exception) {
+                false
+            } finally { try { sock?.close() } catch (_: Exception) {} }
+        }
 
         private fun jsonFrame(json: String): ByteArray {
             val body = json.trim().toByteArray(Charsets.UTF_8)
@@ -203,20 +260,17 @@ class TvWebActivity : Activity() {
 
         private fun readGcdhFrames(`in`: InputStream, totalWaitMs: Long, debug: StringBuilder): List<Pair<Int,ByteArray>> {
             val chunks = ArrayList<Pair<Int,ByteArray>>()
-            val end = System.currentTimeMillis() + max(3000L, totalWaitMs)
+            val end = System.currentTimeMillis() + max(300L, totalWaitMs)
             while (System.currentTimeMillis() < end) {
                 try {
                     if (`in`.available() < 16) { Thread.sleep(20); continue }
                     val hdr = readExact(`in`, 16) ?: break
-                    if (!(hdr[0]=='G'.code.toByte() && hdr[1]=='C'.code.toByte() && hdr[2]=='D'.code.toByte() && hdr[3]=='H'.code.toByte())) {
-                        debug.append("Non-GCDH header: ${hdr.copyOf(4).toString(Charsets.US_ASCII)}\n")
-                        break
-                    }
+                    if (!(hdr[0]=='G'.code.toByte() && hdr[1]=='C'.code.toByte() && hdr[2]=='D'.code.toByte() && hdr[3]=='H'.code.toByte())) break
                     val payloadLen = beInt(hdr, 4)
                     val msgType   = beInt(hdr, 8)
                     val extra     = beInt(hdr,12)
                     debug.append("GCDH frame len=$payloadLen type=$msgType extra=$extra\n")
-                    if (payloadLen < 0 || payloadLen > 8*1024*1024) { debug.append("Aborting: bad len\n"); break }
+                    if (payloadLen < 0 || payloadLen > 8*1024*1024) break
                     val comp = readExact(`in`, payloadLen) ?: break
                     val inflated = tryInflate(comp) ?: comp
                     chunks += msgType to inflated
@@ -249,7 +303,6 @@ class TvWebActivity : Activity() {
 
             for ((type, bytes) in all) {
                 val text = String(bytes, Charsets.UTF_8)
-                debug.append("-- textLen=${text.length} type=$type\n")
                 try {
                     if (text.trim().startsWith("[")) {
                         val arr = JSONArray(text)
@@ -280,7 +333,7 @@ class TvWebActivity : Activity() {
                     }
                 } catch (_: Exception) { /* ignore */ }
 
-                // Fallback: player.<ID> pattern
+                // Fallback: player.<ID>
                 Regex("""player\.([0-9]+)""").findAll(text).forEach { m ->
                     addObj(null, m.groupValues[1], null, false)
                 }
@@ -301,15 +354,10 @@ class TvWebActivity : Activity() {
                 sock = Socket(ip, port).apply { soTimeout = 2500 }
                 val out: OutputStream = sock.getOutputStream()
                 val `in`: InputStream = sock.getInputStream()
-
-                // send frames with small delays
                 for (f in frames) { out.write(f); out.flush(); try { Thread.sleep(40) } catch (_: Exception) {} }
-
-                // keep reading for longer
                 val framesIn = readGcdhFrames(`in`, totalWaitMs = listenMillis, debug)
-                if (framesIn.isEmpty()) { debug.append("No GCDH frames read on $port\n"); return JSONArray() }
                 val chans = parseChannelsFromTexts(framesIn, ip, debug)
-                if (chans.length() == 0) debug.append("Parsed 0 channels on $port\n")
+                prefs.edit().putString("last_debug", debug.toString().take(16000)).apply()
                 chans
             } catch (e: Exception) {
                 debug.append("Error $ip:$port -> ${e.message}\n")
@@ -317,7 +365,7 @@ class TvWebActivity : Activity() {
             } finally { try { sock?.close() } catch (_: Exception) {} }
         }
 
-        // ===== HTTP SWEEP FALLBACK (still here if you need it) =====
+        // ===== HTTP sweep (optional) =====
         @JavascriptInterface
         fun discoverStb(maxHosts: Int): String {
             val results = mutableListOf<Map<String,String>>()
