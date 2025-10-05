@@ -22,13 +22,13 @@
 <body>
   <h2>GmScreen Remote</h2>
 
-  <!-- Auto-detect devices -->
+  <!-- Auto-detect -->
   <div class="row">
     <button class="btn" id="btnScan">Auto-detect STB</button>
   </div>
   <div class="row"><div id="devices" style="width:92%;max-width:1000px;"></div></div>
 
-  <!-- Minimal remote controls -->
+  <!-- Minimal remote -->
   <div class="row">
     <button class="btn" data-key="42">POWER</button>
     <button class="btn" data-key="13">1</button>
@@ -36,15 +36,16 @@
     <button class="btn" data-key="15">3</button>
   </div>
 
-  <!-- Play by Channel ID -->
+  <!-- Play by ID -->
   <div class="row">
     <input id="chanId" class="txt" placeholder="Channel ID (e.g., 22621080)">
     <button class="btn" id="btnPlayById">Play in VLC</button>
   </div>
 
-  <!-- Playlist loader -->
+  <!-- Playlist -->
   <div class="row">
     <input id="plist" class="txt" placeholder="Playlist URL (e.g., http://<STB_IP>:8085/playlist.m3u)">
+    <button class="btn" id="btnFindPl">Find playlist</button>
     <button class="btn" id="btnLoad">Load channels</button>
   </div>
   <div class="row"><div id="chanCount" style="margin:6px 0;"></div></div>
@@ -68,7 +69,6 @@
   function renderIp(){
     var s = getIp();
     document.getElementById('ip').textContent = s ? ("Current STB IP: "+s) : "No STB IP set";
-    // default playlist
     try{
       var el = document.getElementById('plist');
       if (el && (!el.value || !el.value.trim()) && window.NativeBridge && NativeBridge.defaultPlaylistUrl) {
@@ -90,7 +90,7 @@
     try{ NativeBridge.openChannelById(id); }catch(e){}
   };
 
-  // Load playlist (native fetch to avoid CORS)
+  // Playlist loader
   function row(name, id, url){
     var div = document.createElement('div'); div.className='item';
     var left = document.createElement('div'); left.className='name';
@@ -113,27 +113,49 @@
     }
   };
 
-  // Auto-detect devices: probe LAN for :8085/playlist.m3u
-  function deviceRow(ip, name){
+  // Find playlist for saved IP
+  document.getElementById('btnFindPl').onclick = function(){
+    try{
+      var u = NativeBridge.findPlaylistForSavedIp();
+      if (u){ document.getElementById('plist').value = u; alert("Found playlist:\n"+u); }
+      else { alert("No common playlist found on :8085.\nYou can still play by Channel ID or paste a known playlist URL."); }
+    }catch(e){ alert("Failed to check playlist."); }
+  };
+
+  // Auto-detect: UDP first, then HTTP
+  function deviceRow(ip, name, playlist){
     var div = document.createElement('div'); div.className='device';
     var left = document.createElement('div'); left.textContent = (name||'STB') + "  ("+ip+")";
     var btn = document.createElement('button'); btn.className='btn tiny'; btn.textContent='Connect';
     btn.onclick = function(){
-      setIp(ip); alert("Connected to: "+ip); renderIp();
+      setIp(ip);
+      if (playlist) document.getElementById('plist').value = playlist;
+      alert("Connected to: "+ip);
+      renderIp();
     };
     div.appendChild(left); div.appendChild(btn);
     return div;
   }
+
   document.getElementById('btnScan').onclick = function(){
-    var box = document.getElementById('devices'); box.innerHTML = 'Scanning...';
+    var box = document.getElementById('devices'); box.innerHTML = 'Listening for UDP beacons...';
     try{
-      // scan up to 256 hosts in the /24
+      var udpJson = NativeBridge.discoverUdp25860(3000);
+      var arr = []; try { arr = JSON.parse(udpJson); } catch(e){}
+      if (arr.length) {
+        box.innerHTML = '';
+        arr.forEach(it => box.appendChild(deviceRow(it.ip, it.name, it.playlist)));
+        return;
+      }
+    }catch(e){}
+    // fallback
+    box.innerHTML = 'Scanning LAN for :8085...';
+    try{
       var json = NativeBridge.discoverStb(256);
-      var arr = [];
-      try { arr = JSON.parse(json); } catch(e){}
+      var arr2 = []; try { arr2 = JSON.parse(json); } catch(e){}
       box.innerHTML = '';
-      if (!arr.length) { box.textContent = 'No devices found. Make sure the TV and STB are on the same network.'; return; }
-      arr.forEach(it => box.appendChild(deviceRow(it.ip, it.name)));
+      if (!arr2.length) { box.textContent = 'No devices found. Make sure the TV and STB are on the same network.'; return; }
+      arr2.forEach(it => box.appendChild(deviceRow(it.ip, it.name, it.playlist)));
     }catch(e){
       box.textContent = 'Scan failed.';
     }
