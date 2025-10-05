@@ -153,26 +153,23 @@ class TvWebActivity : Activity() {
             val ip = getStbIp().trim()
             if (ip.isEmpty()) return "[]"
 
-            // Only 20000 – others were refused on your box
             val port = 20000
-
-            // Build a small sequence like the PC app: handshake + list-type + window scans + heartbeat
             val seq = mutableListOf<ByteArray>().apply {
-                add(jsonFrame("""{"request":"1012"}"""))                                 // hello
-                add(jsonFrame("""{"request":"1007","IsFavList":"0","SelectListType":"0"}""")) // TV list
+                add(jsonFrame("""{"request":"1012"}"""))
+                add(jsonFrame("""{"request":"1007","IsFavList":"0","SelectListType":"0"}"""))
                 listOf(0 to 199, 200 to 399, 400 to 799).forEach { (a,b) ->
                     add(jsonFrame("""{"request":"0","FromIndex":"$a","ToIndex":"$b"}"""))
                 }
-                add(jsonFrame("""{"request":"26"}""")) // keepalive
+                add(jsonFrame("""{"request":"26"}"""))
             }
 
             val dbg = StringBuilder()
-            val res = talkToControl(ip, port, seq, dbg)
+            val arr = talkToControlParse(ip, port, seq, dbg)
             prefs.edit().putString("last_debug", dbg.toString().take(12000)).apply()
-            return res.toString()
+            return arr.toString()
         }
 
-        // NEW: ask for CURRENT tuned channel play URL (type 1009 in your PC logs)
+        // NEW: ask for CURRENT tuned channel play URL (type 1009 from PC logs)
         @JavascriptInterface
         fun getCurrentPlayUrl(): String {
             val ip = getStbIp().trim()
@@ -181,12 +178,11 @@ class TvWebActivity : Activity() {
             val dbg = StringBuilder()
             val frames = listOf(
                 jsonFrame("""{"request":"1012"}"""),
-                jsonFrame("""{"request":"1009"}""") // request “current play url”
+                jsonFrame("""{"request":"1009"}""")
             )
-            val chunks = talkToControl(ip, 20000, frames, dbg, wantAll = true)
+            val chunks: List<Pair<Int, ByteArray>> = talkToControlAll(ip, 20000, frames, dbg)
             prefs.edit().putString("last_debug", dbg.toString().take(12000)).apply()
 
-            // Find a JSON that contains success/url like the PC log
             for ((type, bytes) in chunks) {
                 if (type == 1009 || type == 0 || type == 12) {
                     val t = String(bytes, Charsets.UTF_8).trim()
@@ -250,7 +246,7 @@ class TvWebActivity : Activity() {
                 val extra     = beInt(hdr,12)
                 debug.append("GCDH frame: len=$payloadLen type=$msgType extra=$extra\n")
 
-                // Some firmwares legitimately send len=0 for 1012; don’t abort
+                // Some firmwares send len=0 for 1012; accept it
                 if (payloadLen < 0 || payloadLen > 8*1024*1024) {
                     debug.append("Aborting: bad len\n"); break
                 }
@@ -279,7 +275,6 @@ class TvWebActivity : Activity() {
             for ((type, bytes) in all) {
                 val text = String(bytes, Charsets.UTF_8)
                 debug.append("-- type=$type textLen=${text.length}\n")
-                // JSON array/object styles we observed
                 try {
                     if (text.trim().startsWith("[")) {
                         val arr = JSONArray(text)
@@ -310,37 +305,43 @@ class TvWebActivity : Activity() {
             return out
         }
 
-        private fun talkToControl(
+        // ---- typed socket helpers ----
+        private fun talkToControlAll(
             ip: String,
             port: Int,
             frames: List<ByteArray>,
-            debug: StringBuilder,
-            wantAll: Boolean = false
-        ): Any {
+            debug: StringBuilder
+        ): List<Pair<Int,ByteArray>> {
             var sock: Socket? = null
             return try {
                 debug.append("Connecting $ip:$port\n")
                 sock = Socket(ip, port).apply { soTimeout = 3000 }
                 val out: OutputStream = sock.getOutputStream()
                 val `in`: InputStream = sock.getInputStream()
-
                 for (f in frames) { out.write(f); out.flush(); try { Thread.sleep(50) } catch (_: Exception) {} }
-
-                val framesIn = readGcdhFrames(`in`, totalWaitMs = 3000L, debug)
-                if (wantAll) return framesIn
-                if (framesIn.isEmpty()) {
-                    debug.append("No GCDH frames read on $port\n")
-                    return JSONArray()
-                }
-                val chans = parseChannelsFromTexts(framesIn, ip, debug)
-                if (chans.length() == 0) debug.append("Parsed 0 channels on $port\n")
-                chans
+                readGcdhFrames(`in`, totalWaitMs = 3000L, debug)
             } catch (e: Exception) {
                 debug.append("Error $ip:$port -> ${e.message}\n")
-                if (wantAll) emptyList<Pair<Int,ByteArray>>() else JSONArray()
+                emptyList()
             } finally {
                 try { sock?.close() } catch (_: Exception) {}
             }
+        }
+
+        private fun talkToControlParse(
+            ip: String,
+            port: Int,
+            frames: List<ByteArray>,
+            debug: StringBuilder
+        ): JSONArray {
+            val framesIn = talkToControlAll(ip, port, frames, debug)
+            if (framesIn.isEmpty()) {
+                debug.append("No GCDH frames read on $port\n")
+                return JSONArray()
+            }
+            val chans = parseChannelsFromTexts(framesIn, ip, debug)
+            if (chans.length() == 0) debug.append("Parsed 0 channels on $port\n")
+            return chans
         }
 
         // ===== HTTP SWEEP (optional) =====
