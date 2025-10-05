@@ -4,59 +4,43 @@
 <meta charset="utf-8"/>
 <title>GmScreen TV (online)</title>
 <style>
-  :root{
-    --bg:#181a1f; --panel:#23262d; --panel2:#2a2f37; --text:#e9eef6; --muted:#9aa4b2;
-    --accent:#4da3ff; --accent2:#7cd992; --danger:#ff6b6b;
-  }
+  :root{--bg:#181a1f;--panel:#23262d;--panel2:#2a2f37;--text:#e9eef6;--muted:#9aa4b2;--accent:#4da3ff;--accent2:#7cd992;--danger:#ff6b6b;}
   html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,Arial}
   .wrap{display:grid;grid-template-columns: 380px 1fr;gap:14px;height:100%;}
   .left{background:var(--panel);padding:14px;display:flex;flex-direction:column}
   .right{background:var(--panel);padding:14px;overflow:hidden;display:flex;flex-direction:column}
-
   h2{margin:0 0 10px;font-size:18px;color:#fff}
-  .btn{border:0;border-radius:10px;background:var(--accent);color:#001833;font-weight:700;
-       padding:10px 14px;margin:6px 0;font-size:16px;min-height:44px}
+  .btn{border:0;border-radius:10px;background:var(--accent);color:#001833;font-weight:700;padding:10px 14px;margin:6px 0;font-size:16px;min-height:44px}
   .btn.alt{background:#3c4351;color:#fff}
   .btn.good{background:var(--accent2);color:#04220f}
   .btn.danger{background:var(--danger);color:#1a0000}
   .btn:focus{outline:3px solid #ffd24d}
   .row{display:flex;gap:8px;flex-wrap:wrap}
-  input.txt{width:100%;background:#11161b;border:1px solid #39424f;color:#e9eef6;
-            padding:10px 12px;border-radius:10px;font-size:16px}
+  input.txt{width:100%;background:#11161b;border:1px solid #39424f;color:#e9eef6;padding:10px 12px;border-radius:10px;font-size:16px}
   .hint{color:var(--muted);font-size:12px;margin-top:6px}
   .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#39424f;color:#d8e4ff;font-size:12px;margin-left:8px}
 
-  /* list */
   #listWrap{position:relative;flex:1;min-height:0}
   #list{position:absolute;inset:0;overflow:auto;padding-right:8px}
-  .item{background:var(--panel2);border:1px solid #313846;border-radius:12px;
-        padding:10px 12px;margin:8px 0;display:flex;align-items:center;justify-content:space-between}
-  .item .name{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%}
+  .item{background:var(--panel2);border:1px solid #313846;border-radius:12px;padding:10px 12px;margin:8px 0;display:flex;align-items:center;justify-content:space-between}
+  .item.playing{border-color:#3a6cff; box-shadow:0 0 0 2px #3a6cff55 inset}
+  .name{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%}
   .play{min-width:86px}
   .idx{font-size:12px;color:#cfe3ff;background:#2d3746;border-radius:999px;padding:2px 8px;margin-left:8px}
   .sid{font-size:12px;color:#9ab0c9;margin-left:8px}
-
-  /* focusable for DPAD */
   .focusable{outline:none}
   .focusable:focus{box-shadow:0 0 0 3px #ffd24d inset;border-radius:10px}
 
-  /* debug drawer */
   #dbgBtn{position:fixed;right:16px;bottom:16px;z-index:30}
-  #dbg{position:fixed;left:0;right:0;bottom:0;height:38vh;background:#0e1217;border-top:2px solid #2a3140;
-       transform:translateY(110%);transition:.25s;z-index:25;display:flex;flex-direction:column}
+  #dbg{position:fixed;left:0;right:0;bottom:0;height:38vh;background:#0e1217;border-top:2px solid #2a3140;transform:translateY(110%);transition:.25s;z-index:25;display:flex;flex-direction:column}
   #dbg.open{transform:translateY(0)}
   #dbgHead{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#10151c}
   #dbgBody{flex:1;overflow:auto;white-space:pre-wrap;color:#c8d2e3;padding:8px 12px;font:12px/1.35 monospace}
-  .tag{background:#354153;border-radius:7px;padding:3px 8px;color:#cfe; font-size:12px}
-
-  /* top bar right */
   #count{color:#cfe;margin-left:8px}
 </style>
 </head>
 <body>
 <div class="wrap">
-
-  <!-- LEFT COLUMN -->
   <div class="left">
     <h2>Connection</h2>
     <div class="row">
@@ -70,197 +54,95 @@
       <button id="btnFetchLong" class="btn focusable">Fetch channels (long listen)</button>
       <button id="btnClear" class="btn danger alt focusable">Clear list</button>
     </div>
-    <div class="hint">
-      Long listen calls the same fetch repeatedly for ~12s, merging new channels as they appear.
-    </div>
+    <div class="hint">Keeps socket open ~12s and merges everything the STB pushes.</div>
 
     <h2 style="margin-top:18px;">Play by ID</h2>
     <input id="byId" class="txt focusable" placeholder="Channel ID (e.g., 22621080)">
-    <div class="row">
-      <button id="btnPlayId" class="btn good focusable">Play in VLC</button>
-    </div>
-
+    <div class="row"><button id="btnPlayId" class="btn good focusable">Play in VLC</button></div>
     <div class="hint" id="status"></div>
   </div>
 
-  <!-- RIGHT COLUMN -->
   <div class="right">
     <div class="row" style="align-items:center;margin-bottom:6px">
       <input id="search" class="txt focusable" placeholder="Search channel name or ServiceID…">
       <span id="count" class="pill">Channels: 0</span>
     </div>
-
-    <div id="listWrap">
-      <div id="list" tabindex="0" class="focusable"></div>
-    </div>
+    <div id="listWrap"><div id="list" tabindex="0" class="focusable"></div></div>
   </div>
-
 </div>
 
-<!-- floating debug -->
 <button id="dbgBtn" class="btn alt focusable">Show debug</button>
 <div id="dbg">
-  <div id="dbgHead">
-    <div>
-      <span class="tag">Debug</span>
-      <span id="dbgHint" class="hint" style="margin-left:8px"></span>
-    </div>
-    <button id="dbgClose" class="btn alt focusable" style="min-width:90px">Close</button>
-  </div>
+  <div id="dbgHead"><div><span class="pill">Debug</span></div><button id="dbgClose" class="btn alt focusable">Close</button></div>
   <div id="dbgBody"></div>
 </div>
 
 <script>
 (function(){
-  /* ---------- helpers ---------- */
-  const $ = sel => document.querySelector(sel);
-  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const $ = s=>document.querySelector(s);
+  const sleep = ms=>new Promise(r=>setTimeout(r,ms));
+  function getIp(){ try{return NativeBridge.getStbIp()}catch(_){return""} }
+  function setIp(v){ try{NativeBridge.setStbIp(v)}catch(_){ } }
+  function fetchOnce(){ try{return JSON.parse(NativeBridge.fetchChannelsFromStb()||"[]")}catch(_){return[]} }
+  function openVlc(u){ try{NativeBridge.openInVlc(u)}catch(_){ } }
+  function getDebug(){ try{return NativeBridge.getLastDebug()}catch(_){return""} }
 
-  function getIp(){ try{ return NativeBridge.getStbIp() }catch(_){ return "" } }
-  function setIp(v){ try{ NativeBridge.setStbIp(v) }catch(_){} }
-  function openVlc(u){ try{ NativeBridge.openInVlc(u) }catch(_){} }
-  function fetchOnce(){
-    try{ return JSON.parse(NativeBridge.fetchChannelsFromStb()||"[]") }catch(_){ return [] }
-  }
-  function getDebug(){ try{ return NativeBridge.getLastDebug() }catch(_){ return "" } }
+  let all=[], visible=[], seen=new Set();
+  function setIpLine(){ const ip=getIp(); $('#ipLine').textContent = ip?`Connected to: ${ip}`:'No STB selected'; }
 
-  /* ---------- state ---------- */
-  let all = [];          // master list {name,id,url,idx?}
-  let visible = [];      // filtered
-  let lastSeenIds = new Set();
-
-  function setIpLine(){
-    const ip = getIp();
-    $('#ipLine').textContent = ip ? `Connected to: ${ip}` : 'No STB selected';
-  }
-
-  /* ---------- render ---------- */
   const list = $('#list');
-
-  function itemRow(it, i){
-    const div = document.createElement('div');
-    div.className = 'item focusable';
-    div.setAttribute('tabindex','0');
-
-    const left = document.createElement('div');
-    left.className = 'name';
-    left.textContent = it.name || ('Channel ' + (it.id||''));
-    const sid = document.createElement('span');
-    sid.className = 'sid'; sid.textContent = `[${it.id||''}]`;
-    left.appendChild(sid);
-    if (typeof it.idx === 'number'){
-      const ix = document.createElement('span'); ix.className='idx'; ix.textContent='Idx '+it.idx; left.appendChild(ix);
-    }
-
-    const play = document.createElement('button');
-    play.className = 'btn good play focusable';
-    play.textContent = 'Play';
-    play.onclick = () => openVlc(it.url);
-
-    div.appendChild(left);
-    div.appendChild(play);
-
-    // DPAD: Enter = play, Left/Right moves focus to play/name sensibly
-    div.onkeydown = (e)=>{
-      if (e.key === 'Enter'){ openVlc(it.url); e.preventDefault(); }
-      if (e.key === 'ArrowRight'){ play.focus(); e.preventDefault(); }
-    };
+  function row(it){
+    const div=document.createElement('div'); div.className='item focusable'+(it.playing?' playing':''); div.tabIndex=0;
+    const left=document.createElement('div'); left.className='name';
+    left.textContent=it.name||('Channel '+(it.id||'')); const sid=document.createElement('span'); sid.className='sid'; sid.textContent=`[${it.id||''}]`; left.appendChild(sid);
+    if(typeof it.idx==='number'){ const ix=document.createElement('span'); ix.className='idx'; ix.textContent='Idx '+it.idx; left.appendChild(ix); }
+    const btn=document.createElement('button'); btn.className='btn good play focusable'; btn.textContent='Play in VLC';
+    btn.onclick=()=>openVlc(it.url);
+    div.appendChild(left); div.appendChild(btn);
+    div.onkeydown=e=>{ if(e.key==='Enter'){ openVlc(it.url); e.preventDefault(); } if(e.key==='ArrowRight'){ btn.focus(); e.preventDefault(); } };
     return div;
   }
-
   function render(){
-    const q = ($('#search').value||'').trim().toLowerCase();
-    visible = !q ? all.slice()
-                 : all.filter(x => (x.name||'').toLowerCase().includes(q) || String(x.id||'').includes(q));
-    $('#count').textContent = `Channels: ${visible.length}`;
-    list.innerHTML = '';
-    for (const it of visible) list.appendChild(itemRow(it));
+    const q=($('#search').value||'').trim().toLowerCase();
+    visible = !q ? all.slice() : all.filter(x=> (x.name||'').toLowerCase().includes(q) || String(x.id||'').includes(q));
+    list.innerHTML=''; visible.forEach(it=>list.appendChild(row(it)));
+    $('#count').textContent='Channels: '+visible.length;
   }
-
-  /* ---------- merging ---------- */
-  function merge(newArr){
-    let added = 0;
-    for (const o of newArr){
-      const id = String(o.id||'').trim();
-      if (!id) continue;
-      if (!lastSeenIds.has(id)){
-        lastSeenIds.add(id);
-        all.push({ name:o.name || `Channel ${id}`, id, url:o.url, idx:o.idx });
-        added++;
-      }
+  function merge(arr){
+    let added=0;
+    for(const o of arr){
+      const id=String(o.id||'').trim(); if(!id || seen.has(id)) continue;
+      seen.add(id); all.push({name:o.name||('Channel '+id), id, url:o.url, idx:o.idx, playing: !!o.playing});
+      added++;
     }
-    if (added) render();
+    if(added) render();
     return added;
   }
 
-  /* ---------- long listen loop (no Kotlin change) ---------- */
   async function longListen(){
-    all = []; lastSeenIds = new Set(); render();
-    $('#status').textContent = 'Listening…';
-    const started = Date.now();
-    let stagnant = 0;
-
-    while (Date.now() - started < 12000){          // ~12s window
-      const before = all.length;
-      const arr = fetchOnce();                      // same call, Android returns whatever it has now
-      merge(arr);
-      const growth = all.length - before;
-      if (growth === 0) stagnant++; else stagnant = 0;
-      // stop early if nothing new after 3 cycles
-      if (stagnant >= 3) break;
+    all=[]; seen=new Set(); render(); $('#status').textContent='Listening…';
+    const start=Date.now(); let stagnant=0;
+    while(Date.now()-start<13000){
+      const before=all.length;
+      merge(fetchOnce());
+      const growth=all.length-before; stagnant = growth?0:stagnant+1;
+      if(stagnant>=2) break; // stop early if two passes with nothing new
       await sleep(1500);
     }
-    $('#status').textContent = `Done. Total ${all.length}`;
-    // update debug text
-    $('#dbgBody').textContent = getDebug();
+    $('#status').textContent=`Done. Total ${all.length}`;
+    $('#dbgBody').textContent=getDebug();
   }
 
-  /* ---------- search ---------- */
-  $('#search').oninput = render;
-
-  /* ---------- play by id ---------- */
-  $('#btnPlayId').onclick = ()=>{
-    const id = ($('#byId').value||'').trim();
-    if (!id) return;
-    const ip = getIp();
-    if (!ip) return alert('Set STB IP first.');
-    openVlc(`http://${ip}:8085/player.${id}`);
-  };
-
-  /* ---------- discover & ip ---------- */
-  $('#btnDiscover').onclick = ()=>{
-    try{
-      const list = JSON.parse(NativeBridge.discoverUdp25860(3000)||'[]');
-      if (!list.length) return alert('No STB beacons on UDP 25860.');
-      const pick = list[0]; setIp(pick.ip); setIpLine(); alert('Using '+pick.ip);
-    }catch(_){ alert('Discover failed'); }
-  };
-  $('#btnIp').onclick = ()=>{
-    const cur = getIp() || '';
-    const v = prompt('Enter STB IP', cur);
-    if (v) { setIp(v.trim()); setIpLine(); }
-  };
-
-  /* ---------- buttons ---------- */
-  $('#btnFetchLong').onclick = longListen;
-  $('#btnClear').onclick = ()=>{ all=[]; lastSeenIds=new Set(); render(); $('#status').textContent='Cleared.' };
-
-  /* ---------- debug drawer ---------- */
-  const dbg = $('#dbg');
-  $('#dbgBtn').onclick = ()=>{ $('#dbgBody').textContent = getDebug(); dbg.classList.add('open'); };
-  $('#dbgClose').onclick = ()=> dbg.classList.remove('open');
-
-  /* ---------- DPAD scrolling helper ---------- */
-  list.addEventListener('keydown', e=>{
-    if (e.key === 'PageDown' || e.key === 'PageUp'){
-      const v = list.clientHeight * (e.key==='PageDown' ? 0.9 : -0.9);
-      list.scrollBy(0, v); e.preventDefault();
-    }
-  });
-
-  // initial
-  setIpLine();
-  render();
+  $('#search').oninput=render;
+  $('#btnPlayId').onclick=()=>{ const id=($('#byId').value||'').trim(); const ip=getIp(); if(!id||!ip) return; openVlc(`http://${ip}:8085/player.${id}`); };
+  $('#btnDiscover').onclick=()=>{ try{ const arr=JSON.parse(NativeBridge.discoverUdp25860(3000)||'[]'); if(!arr.length) return alert('No STB beacons.'); setIp(arr[0].ip); setIpLine(); alert('Using '+arr[0].ip); }catch(_){ alert('Discover failed'); } };
+  $('#btnIp').onclick=()=>{ const cur=getIp()||''; const v=prompt('Enter STB IP', cur); if(v){ setIp(v.trim()); setIpLine(); } };
+  $('#btnFetchLong').onclick=longListen;
+  $('#btnClear').onclick=()=>{ all=[]; seen=new Set(); render(); $('#status').textContent='Cleared.' };
+  $('#dbgBtn').onclick=()=>{ $('#dbgBody').textContent=getDebug(); $('#dbg').classList.add('open'); };
+  $('#dbgClose').onclick=()=>$('#dbg').classList.remove('open');
+  list.addEventListener('keydown', e=>{ if(e.key==='PageDown'||e.key==='PageUp'){ list.scrollBy(0, list.clientHeight*(e.key==='PageDown'?0.9:-0.9)); e.preventDefault(); } });
+  setIpLine(); render();
 })();
 </script>
 </body>
