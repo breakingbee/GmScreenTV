@@ -2,182 +2,261 @@
 <html>
 <head>
 <meta charset="utf-8"/>
-<title>GmScreen TV</title>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>GmScreen Remote</title>
 <style>
-  :root{ --bg:#0f0f10; --card:#1b1c1f; --accent:#2b63ff; --focus:#ffcc00; --txt:#fff; --muted:#b9bcc4; }
-  *{box-sizing:border-box}
-  html,body{height:100%}
-  body{margin:0;background:var(--bg);color:var(--txt);font-family:Arial,Helvetica,sans-serif;overflow:hidden}
-  h2{margin:16px 0 10px;text-align:center}
-  .row{display:flex;justify-content:center;flex-wrap:wrap;gap:10px}
-  .btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:12px 16px;font-size:16px;font-weight:bold;min-width:150px}
-  .btn:focus{outline:3px solid var(--focus)}
-  .status{text-align:center;color:var(--muted);margin:8px 0}
-  .toolbar{display:flex;justify-content:center;align-items:center;gap:10px;margin:8px 0}
-  .search,.sat{height:44px;border-radius:8px;border:1px solid #30333a;background:#141519;color:#fff;padding:0 14px;font-size:16px}
-  .sat{min-width:220px}
-  .search:focus,.sat:focus{outline:3px solid var(--focus)}
-  #listWrap{height:58vh;max-width:1100px;margin:0 auto;padding:0 10px 10px;overflow-y:auto}
-  .item{display:flex;gap:10px;align-items:center;background:var(--card);border-radius:10px;padding:10px 10px;margin:6px 0}
-  .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .id{color:var(--muted);font-size:14px}
-  .action{display:flex;gap:8px}
-  .small{min-width:100px}
-  .kbd{font-family:monospace;color:var(--muted)}
-  .count{text-align:center;color:var(--muted);margin:4px 0 8px}
-  #debug{display:none;white-space:pre-wrap;background:#0b0c0f;border-top:1px solid #262830;padding:10px;height:20vh;overflow:auto}
+  body{background:#9f9f9f;margin:0;font-family:Arial,Helvetica,sans-serif}
+  h2{margin:20px 0 8px;text-align:center}
+  .row{display:flex;justify-content:center;flex-wrap:wrap;margin:6px 0}
+  .btn{margin:6px;padding:10px 14px;background:#000;color:#fff;font-weight:bold;border:none;border-radius:6px;min-width:56px;font-size:16px}
+  .btn:focus{outline:2px solid #ffcc00}
+  .btn:active{transform:translateY(2px)}
+  .tiny{min-width:46px;font-size:14px;padding:8px 10px}
+  #ip{font-size:12px;color:#222;text-align:center;margin-top:6px}
+  #listWrap{width:92%;max-width:1200px}
+  #list{max-height:68vh;overflow:auto;width:100%;padding:4px 2px;background:#f2f2f2;border-radius:8px}
+  .item{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#fff;margin:6px;border-radius:8px}
+  .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:56%}
+  .item:focus{outline:3px solid #0077ff}
+  input.txt{min-width:320px;padding:10px;border-radius:6px;border:1px solid #999}
+  .device{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#e8f0ff;margin:6px 0;border-radius:6px;width:92%;max-width:1000px}
+  .mono{font-family:monospace;font-size:12px;color:#222;white-space:pre-wrap;max-height:24vh;overflow:auto;background:#f8f8f8;border:1px solid #ccc;border-radius:6px;padding:6px}
+  .pill{background:#444;color:#fff;border-radius:10px;padding:2px 8px;margin-left:8px;font-size:12px}
+  .grow{flex:1}
 </style>
 </head>
 <body>
-  <h2>GmScreen TV</h2>
+  <h2>GmScreen Remote</h2>
 
+  <!-- Auto-detect -->
+  <div class="row"><button class="btn" id="btnScan">Auto-detect STB</button></div>
+  <div class="row"><div id="devices"></div></div>
+
+  <!-- Minimal remote -->
   <div class="row">
-    <button id="btnAuto"  class="btn" tabindex="0">Auto-detect STB</button>
-    <button id="btnIp"    class="btn" tabindex="0">Change IP</button>
-    <button id="btnFetch" class="btn" tabindex="0">Fetch channels</button>
-    <button id="btnDebug" class="btn" tabindex="0">Show debug</button>
+    <button class="btn" data-key="42">POWER</button>
+    <button class="btn" data-key="13">1</button>
+    <button class="btn" data-key="14">2</button>
+    <button class="btn" data-key="15">3</button>
   </div>
 
-  <div class="status">Connected to: <span id="ip">–</span></div>
-
-  <div class="toolbar">
-    <input id="search" class="search" placeholder="Search name or ServiceID…" tabindex="0">
-    <select id="sat" class="sat" tabindex="0"><option value="">All satellites</option></select>
+  <!-- Fetch + search -->
+  <div class="row" style="gap:8px;align-items:center">
+    <button class="btn" id="btnFetch">Fetch channels (long listen)</button>
+    <input id="search" class="txt" placeholder="Search channel name or ID…">
+    <button class="btn tiny" id="btnClear">Clear</button>
+    <span id="fetchInfo" class="mono" style="margin:10px;"></span>
   </div>
-  <div class="count" id="count">Channels: 0</div>
 
-  <div id="listWrap" tabindex="-1"></div>
+  <!-- Play by ID -->
+  <div class="row" style="gap:8px">
+    <input id="chanId" class="txt" placeholder="Channel ID (e.g., 22621080)">
+    <button class="btn" id="btnPlayById">Play in VLC</button>
+  </div>
 
-  <div id="debug"></div>
+  <!-- Result list -->
+  <div class="row"><div id="chanCount" style="margin:6px 0;"></div></div>
+  <div class="row"><div id="listWrap"><div id="list" tabindex="0"></div></div></div>
+
+  <!-- Debug -->
+  <div class="row"><button class="btn tiny" id="btnShowDebug">Show last debug</button></div>
+  <div class="row"><div id="debug" class="mono" style="display:none"></div></div>
+
+  <!-- Change IP -->
+  <div class="row"><button id="changeIp" class="btn">Change IP</button></div>
+  <div id="ip"></div>
 
 <script>
 (function(){
-  const ipSpan   = document.getElementById('ip');
-  const listWrap = document.getElementById('listWrap');
-  const count    = document.getElementById('count');
-  const searchEl = document.getElementById('search');
-  const satSel   = document.getElementById('sat');
-  const debugBox = document.getElementById('debug');
+  // ===== Helpers =====
+  function sendKey(k){ try{ if(window.NativeBridge){ NativeBridge.sendRcuKey(String(k)); } }catch(e){} }
+  document.querySelectorAll('.btn[data-key]').forEach(b=> b.onclick=()=>sendKey(b.getAttribute('data-key')) );
 
   function getIp(){ try{ return NativeBridge.getStbIp(); }catch(e){ return ""; } }
-  function setIp(ip){ try{ NativeBridge.setStbIp(ip); }catch(e){} ipSpan.textContent = ip || "–"; }
-  setIp(getIp());
+  function setIp(newIp){ try{ NativeBridge.setStbIp(newIp); }catch(e){} }
+  function renderIp(){
+    var s = getIp();
+    document.getElementById('ip').textContent = s ? ("Current STB IP: "+s) : "No STB IP set";
+  }
+  document.getElementById('changeIp').onclick = function(){
+    var cur = getIp() || "";
+    var ip = prompt("Enter STB IP", cur);
+    if(ip){ setIp(ip); alert("Saved: "+ip); renderIp(); }
+  };
+  renderIp();
 
-  let all = [];      // all channels
-  let shown = [];    // filtered
-  let satellites = [];// {index,name}
+  // ===== Play by ID =====
+  document.getElementById('btnPlayById').onclick = function(){
+    var id = (document.getElementById('chanId').value||"").trim();
+    if(!id){ alert("Enter a channel ID, e.g., 22621080"); return; }
+    try{ NativeBridge.openChannelById(id); }catch(e){}
+  };
 
-  function row(ch){
-    const div = document.createElement('div');
+  // ===== List rendering with TV-remote focus & DPAD scrolling =====
+  let allChannels = [];      // full fetched
+  let filtered = [];         // filtered by search
+  let currentFocusIndex = -1;
+
+  function itemElement(it, idx){
+    var div = document.createElement('div'); 
     div.className='item';
-    const left = document.createElement('div');
+    div.setAttribute('tabindex','0');
+    div.dataset.idx = String(idx);
+
+    var left = document.createElement('div'); 
     left.className='name';
-    left.textContent = ch.name || 'Channel';
+    left.textContent = (it.name||'Channel') + (it.id ? ("  ["+it.id+"]") : "");
+    if (it.serviceIndex && it.serviceIndex >= 0) {
+      var p = document.createElement('span'); p.className='pill'; p.textContent = "Idx "+it.serviceIndex;
+      left.appendChild(p);
+    }
 
-    const id = document.createElement('div');
-    id.className='id';
-    const satLabel = ch.satName ? ` · ${ch.satName}` : (ch.satIndex!=null ? ` · sat#${ch.satIndex}` : '');
-    id.textContent = (ch.id?`[${ch.id}]`:'') + satLabel;
-
-    const act = document.createElement('div'); act.className='action';
-    const bPlay = document.createElement('button'); bPlay.className='btn small'; bPlay.textContent='Play';
-    bPlay.onclick = ()=>{ try{ NativeBridge.openInVlc(ch.url); }catch(e){} };
-
-    const bSwitch = document.createElement('button'); bSwitch.className='btn small'; bSwitch.textContent='Switch';
-    bSwitch.title = 'Tell STB to tune this channel';
-    bSwitch.onclick = ()=>{
-      try{ NativeBridge.switchToServiceId(String(ch.id||'')); }catch(e){}
+    var right = document.createElement('div'); right.style.display='flex'; right.style.gap='6px';
+    var btnPlay = document.createElement('button'); btnPlay.className='btn tiny'; btnPlay.textContent='Play';
+    btnPlay.onclick = function(e){ e.stopPropagation(); try{ NativeBridge.openInVlc(it.url); }catch(e){} };
+    var btnSwitch = document.createElement('button'); btnSwitch.className='btn tiny'; btnSwitch.textContent='Switch';
+    btnSwitch.onclick = function(e){ 
+      e.stopPropagation(); 
+      try{ NativeBridge.trySwitchChannel(it.id||"", Number(it.serviceIndex||-1)); }catch(e){} 
+      // optional: auto-play after a small delay
+      setTimeout(function(){ try{ NativeBridge.openInVlc(it.url); }catch(e){} }, 600);
     };
 
-    act.appendChild(bPlay);
-    act.appendChild(bSwitch);
+    right.appendChild(btnPlay);
+    right.appendChild(btnSwitch);
 
-    div.appendChild(left); div.appendChild(id); div.appendChild(act);
+    div.appendChild(left);
+    div.appendChild(right);
+
+    // click focuses + play (enter key will trigger click)
+    div.onclick = function(){
+      currentFocusIndex = idx;
+      div.focus({preventScroll:false});
+      try{ NativeBridge.openInVlc(it.url); }catch(e){}
+    };
+
+    // When focused via DPAD, keep visible
+    div.addEventListener('focus', ()=> {
+      div.scrollIntoView({block:'nearest', inline:'nearest'});
+      currentFocusIndex = idx;
+    });
+
+    // DPAD on each item
+    div.addEventListener('keydown', (ev)=>{
+      const code = ev.keyCode || ev.which;
+      if (code === 19) { // DPAD_UP
+        ev.preventDefault();
+        moveFocus(-1);
+      } else if (code === 20) { // DPAD_DOWN
+        ev.preventDefault();
+        moveFocus(+1);
+      } else if (code === 23 || code === 66) { // DPAD_CENTER / ENTER
+        ev.preventDefault();
+        try{ NativeBridge.openInVlc(it.url); }catch(e){}
+      }
+    });
+
     return div;
   }
 
-  function render(list){
-    listWrap.innerHTML = '';
-    list.forEach(ch => listWrap.appendChild(row(ch)));
-    count.textContent = 'Channels: ' + list.length;
+  function moveFocus(delta){
+    if (!filtered.length) return;
+    if (currentFocusIndex < 0) currentFocusIndex = 0;
+    else currentFocusIndex = Math.max(0, Math.min(filtered.length-1, currentFocusIndex + delta));
+    const list = document.getElementById('list');
+    const el = list.querySelector('.item[data-idx="'+String(currentFocusIndex)+'"]');
+    if (el) el.focus();
   }
 
-  function applyFilter(){
-    const q = (searchEl.value||'').toLowerCase().trim();
-    const s = satSel.value || '';
-    shown = all.filter(ch => {
-      const bySat = !s || (String(ch.satIndex||'') === s);
-      if (!bySat) return false;
-      if (!q) return true;
-      const name = (ch.name||'').toLowerCase();
-      const id   = String(ch.id||'').toLowerCase();
-      return name.includes(q) || id.includes(q);
-    });
-    render(shown);
+  function renderList(arr){
+    filtered = arr.slice();
+    var list = document.getElementById('list'); 
+    list.innerHTML='';
+    document.getElementById('chanCount').textContent = "Channels: " + arr.length;
+    arr.forEach((it, i) => list.appendChild(itemElement(it, i)));
+    currentFocusIndex = (arr.length ? 0 : -1);
+    if (arr.length) {
+      const first = list.querySelector('.item[data-idx="0"]');
+      if (first) first.focus();
+    }
   }
-  searchEl.addEventListener('input', applyFilter);
-  satSel.addEventListener('change', applyFilter);
 
-  document.getElementById('btnAuto').onclick = function(){
-    try{
-      const json = NativeBridge.discoverUdp25860(3000);
-      const arr = JSON.parse(json||'[]');
-      if (arr.length){ setIp(arr[0].ip); alert('Found STB: '+arr[0].ip); }
-      else alert('No STB beacons seen.');
-    }catch(e){ alert('Auto-detect failed'); }
-  };
-  document.getElementById('btnIp').onclick = function(){
-    const cur = getIp();
-    const ip = prompt('Enter STB IP', cur||'');
-    if (ip){ setIp(ip); alert('Saved: '+ip); }
+  // Global DPAD hooks for when list has focus
+  document.addEventListener('keydown', (ev)=>{
+    const code = ev.keyCode || ev.which;
+    if (code === 19) { // up
+      moveFocus(-1);
+    } else if (code === 20) { // down
+      moveFocus(+1);
+    }
+  });
+
+  // ===== Search =====
+  function filterNow(){
+    const q = (document.getElementById('search').value||"").toLowerCase();
+    if (!q) { renderList(allChannels); return; }
+    const arr = allChannels.filter(it => 
+      (it.name||"").toLowerCase().includes(q) || (String(it.id||"")).includes(q)
+    );
+    renderList(arr);
+  }
+  document.getElementById('search').addEventListener('input', filterNow);
+  document.getElementById('btnClear').onclick = function(){
+    document.getElementById('search').value = "";
+    filterNow();
   };
 
-  // Fetch, parse satellites/meta, then filter by satellite automatically
+  // ===== Fetch flow =====
   document.getElementById('btnFetch').onclick = function(){
-    try{
-      const json = NativeBridge.fetchChannelsFromStb();
-      const arr = JSON.parse(json||'[]');
-
-      // peel meta marker (last object containing __meta)
-      satellites = [];
-      if (arr.length && arr[arr.length-1] && arr[arr.length-1].__meta) {
-        const meta = arr.pop().__meta;
-        satellites = (meta.satellites||[]);
+    document.getElementById('fetchInfo').textContent = "Listening ~12s for STB frames…";
+    setTimeout(function(){
+      try{
+        var json = NativeBridge.fetchChannelsFromStb();
+        var arr = []; try { arr = JSON.parse(json); } catch(e){}
+        allChannels = arr;
+        renderList(arr);
+        if (arr.length) {
+          document.getElementById('fetchInfo').textContent = "OK — " + arr.length + " channels";
+        } else {
+          document.getElementById('fetchInfo').textContent = "No channels (see Debug)";
+          document.getElementById('debug').style.display='block';
+          document.getElementById('debug').textContent = NativeBridge.getLastDebug();
+          alert("Still empty.\nClose the PC app if it’s running and try again.\nDebug visible below.");
+        }
+      }catch(e){
+        document.getElementById('fetchInfo').textContent = "Failed";
+        alert("Fetch failed.");
       }
+    }, 10);
+  };
 
-      all = arr;
+  // ===== Debug =====
+  document.getElementById('btnShowDebug').onclick = function(){
+    var box = document.getElementById('debug');
+    box.style.display='block';
+    box.textContent = NativeBridge.getLastDebug();
+  };
 
-      // fill satellite dropdown
-      satSel.innerHTML = '<option value="">All satellites</option>';
-      satellites.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = String(s.index);
-        opt.textContent = s.name + ' (idx ' + s.index + ')';
-        satSel.appendChild(opt);
-      });
-
-      // if many channels have a satIndex, pick the most common as default
-      const counts = {};
-      all.forEach(ch => { const k = String(ch.satIndex||''); if (k) counts[k]=(counts[k]||0)+1; });
-      let bestKey=''; let bestCount=0;
-      for (const k in counts){ if (counts[k]>bestCount){ bestKey=k; bestCount=counts[k]; } }
-      if (bestKey){ satSel.value = bestKey; }
-
-      applyFilter();
-      if (!all.length) alert('No channels parsed. Open Debug to inspect.');
+  // ===== Auto-detect =====
+  function deviceRow(ip, name){
+    var div = document.createElement('div'); div.className='device';
+    var left = document.createElement('div'); left.textContent = (name||'STB') + "  ("+ip+")";
+    var btn = document.createElement('button'); btn.className='btn tiny'; btn.textContent='Connect';
+    btn.onclick = function(){ setIp(ip); alert("Connected to: "+ip); renderIp(); };
+    div.appendChild(left); div.appendChild(btn);
+    return div;
+  }
+  document.getElementById('btnScan').onclick = function(){
+    var box = document.getElementById('devices'); box.innerHTML = 'Listening for UDP beacons...';
+    try{
+      var udpJson = NativeBridge.discoverUdp25860(3000);
+      var arr = []; try { arr = JSON.parse(udpJson); } catch(e){}
+      box.innerHTML = '';
+      if (arr.length) { arr.forEach(it => box.appendChild(deviceRow(it.ip, it.name))); return; }
+      box.textContent = 'No devices via UDP.';
     }catch(e){
-      alert('Fetch failed');
+      box.textContent = 'Scan failed.';
     }
   };
-
-  document.getElementById('btnDebug').onclick = function(){
-    debugBox.style.display='block';
-    debugBox.textContent = (function(){ try{return NativeBridge.getLastDebug();}catch(e){return '';} })();
-  };
-
-  // start focus on search for TV keyboards
-  setTimeout(()=>{ searchEl.focus(); }, 80);
 })();
 </script>
 </body>
