@@ -1,20 +1,144 @@
-﻿<!doctype html>
+<!doctype html>
 <html>
-<head><meta charset="utf-8"/><title>Remote</title>
+<head>
+<meta charset="utf-8"/>
+<title>GmScreen Remote</title>
 <style>
-body{background:#9f9f9f;font-family:sans-serif;}
-.touche{margin:5px;padding:10px;background:#000;color:#fff;font-weight:bold;border:none;}
-.touche:active{background:#444;}
-</style></head>
-<body><center>
-<h3>GmScreen Remote</h3>
-<button class="touche" RcuKey="42">POWER</button>
-<button class="touche" RcuKey="13">1</button>
-<button class="touche" RcuKey="14">2</button>
-<button class="touche" RcuKey="15">3</button>
-</center>
+  body{background:#9f9f9f;margin:0;font-family:Arial,Helvetica,sans-serif}
+  h2{margin:20px 0 8px;text-align:center}
+  .row{display:flex;justify-content:center;flex-wrap:wrap;margin:6px 0}
+  .btn{margin:6px;padding:10px 14px;background:#000;color:#fff;font-weight:bold;border:none;border-radius:6px;min-width:56px;font-size:16px}
+  .btn:focus{outline:2px solid #ffcc00}
+  .btn:active{transform:translateY(2px)}
+  .tiny{min-width:46px;font-size:14px;padding:8px 10px}
+  #ip{font-size:12px;color:#222;text-align:center;margin-top:6px}
+  #list{max-height:50vh;overflow:auto}
+  .item{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#eee;margin:6px 0;border-radius:6px}
+  .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%}
+  input.txt{min-width:360px;padding:10px;border-radius:6px;border:1px solid #999}
+  .device{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#e8f0ff;margin:6px 0;border-radius:6px}
+</style>
+</head>
+<body>
+  <h2>GmScreen Remote</h2>
+
+  <!-- Auto-detect devices -->
+  <div class="row">
+    <button class="btn" id="btnScan">Auto-detect STB</button>
+  </div>
+  <div class="row"><div id="devices" style="width:92%;max-width:1000px;"></div></div>
+
+  <!-- Minimal remote controls -->
+  <div class="row">
+    <button class="btn" data-key="42">POWER</button>
+    <button class="btn" data-key="13">1</button>
+    <button class="btn" data-key="14">2</button>
+    <button class="btn" data-key="15">3</button>
+  </div>
+
+  <!-- Play by Channel ID -->
+  <div class="row">
+    <input id="chanId" class="txt" placeholder="Channel ID (e.g., 22621080)">
+    <button class="btn" id="btnPlayById">Play in VLC</button>
+  </div>
+
+  <!-- Playlist loader -->
+  <div class="row">
+    <input id="plist" class="txt" placeholder="Playlist URL (e.g., http://<STB_IP>:8085/playlist.m3u)">
+    <button class="btn" id="btnLoad">Load channels</button>
+  </div>
+  <div class="row"><div id="chanCount" style="margin:6px 0;"></div></div>
+  <div class="row"><div id="list" style="width:92%;max-width:1000px;"></div></div>
+
+  <!-- Change IP -->
+  <div class="row">
+    <button id="changeIp" class="btn">Change IP</button>
+  </div>
+  <div id="ip"></div>
+
 <script>
-document.querySelectorAll('.touche').forEach(btn=>{
-  btn.onclick=()=>window.NativeBridge && NativeBridge.sendRcuKey(btn.getAttribute('RcuKey'));
-});
-</script></body></html>
+(function(){
+  // remote buttons
+  function sendKey(k){ try{ if(window.NativeBridge){ NativeBridge.sendRcuKey(String(k)); } }catch(e){} }
+  document.querySelectorAll('.btn[data-key]').forEach(b=> b.onclick=()=>sendKey(b.getAttribute('data-key')) );
+
+  // IP helpers
+  function getIp(){ try{ return NativeBridge.getStbIp(); }catch(e){ return ""; } }
+  function setIp(newIp){ try{ NativeBridge.setStbIp(newIp); }catch(e){} }
+  function renderIp(){
+    var s = getIp();
+    document.getElementById('ip').textContent = s ? ("Current STB IP: "+s) : "No STB IP set";
+    // default playlist
+    try{
+      var el = document.getElementById('plist');
+      if (el && (!el.value || !el.value.trim()) && window.NativeBridge && NativeBridge.defaultPlaylistUrl) {
+        el.value = NativeBridge.defaultPlaylistUrl();
+      }
+    }catch(e){}
+  }
+  document.getElementById('changeIp').onclick = function(){
+    var cur = getIp() || "";
+    var ip = prompt("Enter STB IP", cur);
+    if(ip){ setIp(ip); alert("Saved: "+ip); renderIp(); }
+  };
+  renderIp();
+
+  // Play by ID
+  document.getElementById('btnPlayById').onclick = function(){
+    var id = (document.getElementById('chanId').value||"").trim();
+    if(!id){ alert("Enter a channel ID, e.g., 22621080"); return; }
+    try{ NativeBridge.openChannelById(id); }catch(e){}
+  };
+
+  // Load playlist (native fetch to avoid CORS)
+  function row(name, id, url){
+    var div = document.createElement('div'); div.className='item';
+    var left = document.createElement('div'); left.className='name';
+    left.textContent = name + (id ? ("  ["+id+"]") : "");
+    var play = document.createElement('button'); play.className='btn tiny'; play.textContent='Play';
+    play.onclick = function(){ try{ NativeBridge.openInVlc(url); }catch(e){} };
+    div.appendChild(left); div.appendChild(play);
+    return div;
+  }
+  document.getElementById('btnLoad').onclick = function(){
+    var url = (document.getElementById('plist').value||"").trim();
+    if(!url){ alert("Enter playlist URL"); return; }
+    try{
+      var data = JSON.parse(NativeBridge.fetchM3U(url));
+      var list = document.getElementById('list'); list.innerHTML='';
+      document.getElementById('chanCount').textContent = "Channels: " + data.length;
+      data.forEach(it => list.appendChild(row(it.name||'Channel', it.id||'', it.url)));
+    }catch(e){
+      alert("Failed to load playlist");
+    }
+  };
+
+  // Auto-detect devices: probe LAN for :8085/playlist.m3u
+  function deviceRow(ip, name){
+    var div = document.createElement('div'); div.className='device';
+    var left = document.createElement('div'); left.textContent = (name||'STB') + "  ("+ip+")";
+    var btn = document.createElement('button'); btn.className='btn tiny'; btn.textContent='Connect';
+    btn.onclick = function(){
+      setIp(ip); alert("Connected to: "+ip); renderIp();
+    };
+    div.appendChild(left); div.appendChild(btn);
+    return div;
+  }
+  document.getElementById('btnScan').onclick = function(){
+    var box = document.getElementById('devices'); box.innerHTML = 'Scanning...';
+    try{
+      // scan up to 256 hosts in the /24
+      var json = NativeBridge.discoverStb(256);
+      var arr = [];
+      try { arr = JSON.parse(json); } catch(e){}
+      box.innerHTML = '';
+      if (!arr.length) { box.textContent = 'No devices found. Make sure the TV and STB are on the same network.'; return; }
+      arr.forEach(it => box.appendChild(deviceRow(it.ip, it.name)));
+    }catch(e){
+      box.textContent = 'Scan failed.';
+    }
+  };
+})();
+</script>
+</body>
+</html>
