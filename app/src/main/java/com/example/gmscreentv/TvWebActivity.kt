@@ -18,6 +18,7 @@ import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.Socket
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.zip.Inflater
@@ -104,10 +105,6 @@ class TvWebActivity : Activity() {
             openInVlc("http://$ip:8085/player.$id")
         }
 
-        // ===== LOCAL CH LIST (optional) =====
-        @JavascriptInterface fun saveMyChannels(json: String) { prefs.edit().putString("my_channels", json).apply() }
-        @JavascriptInterface fun loadMyChannels(): String = prefs.getString("my_channels", "[]") ?: "[]"
-
         // ===== AUTO-DETECT (UDP 25860) =====
         @JavascriptInterface
         fun discoverUdp25860(timeoutMs: Int): String {
@@ -146,13 +143,11 @@ class TvWebActivity : Activity() {
             return sb.toString()
         }
 
-        // ========= CONTROL PROTOCOL (TCP 20000) =========
-
+        // ========= CONTROL: PORT 20000 (legacy list) =========
         @JavascriptInterface
         fun fetchChannelsFromStb(): String {
             val ip = getStbIp().trim()
             if (ip.isEmpty()) return "[]"
-
             val port = 20000
             val seq = mutableListOf<ByteArray>().apply {
                 add(jsonFrame("""{"request":"1012"}"""))
@@ -162,30 +157,38 @@ class TvWebActivity : Activity() {
                 }
                 add(jsonFrame("""{"request":"26"}"""))
             }
-
             val dbg = StringBuilder()
             val arr = talkToControlParse(ip, port, seq, dbg)
             prefs.edit().putString("last_debug", dbg.toString().take(12000)).apply()
             return arr.toString()
         }
 
-        // NEW: ask for CURRENT tuned channel play URL (type 1009 from PC logs)
+        // ========= CONTROL: 4113 (XML login) -> 8888 (GCDH control) =========
         @JavascriptInterface
         fun getCurrentPlayUrl(): String {
             val ip = getStbIp().trim()
             if (ip.isEmpty()) return ""
-
             val dbg = StringBuilder()
+
+            // 1) XML login to 4113
+            val logged = loginOver4113(ip, 4113, dbg)
+            if (!logged) {
+                prefs.edit().putString("last_debug", dbg.toString().take(12000)).apply()
+                return ""
+            }
+
+            // 2) Open 8888 and request current play URL (1009)
             val frames = listOf(
                 jsonFrame("""{"request":"1012"}"""),
                 jsonFrame("""{"request":"1009"}""")
             )
-            val chunks: List<Pair<Int, ByteArray>> = talkToControlAll(ip, 20000, frames, dbg)
+            val chunks = talkToControlAll(ip, 8888, frames, dbg)
+
             prefs.edit().putString("last_debug", dbg.toString().take(12000)).apply()
 
             for ((type, bytes) in chunks) {
+                val t = String(bytes, Charsets.UTF_8).trim()
                 if (type == 1009 || type == 0 || type == 12) {
-                    val t = String(bytes, Charsets.UTF_8).trim()
                     if (t.startsWith("[")) {
                         try {
                             val arr = JSONArray(t)
@@ -200,8 +203,7 @@ class TvWebActivity : Activity() {
             return ""
         }
 
-        @JavascriptInterface
-        fun getLastDebug(): String = prefs.getString("last_debug", "") ?: ""
+        @JavascriptInterface fun getLastDebug(): String = prefs.getString("last_debug", "") ?: ""
 
         // ---------- helpers ----------
         private fun jsonFrame(json: String): ByteArray {
@@ -233,7 +235,7 @@ class TvWebActivity : Activity() {
 
         private fun readGcdhFrames(`in`: InputStream, totalWaitMs: Long, debug: StringBuilder): List<Pair<Int,ByteArray>> {
             val chunks = ArrayList<Pair<Int,ByteArray>>()
-            val end = System.currentTimeMillis() + max(2000L, totalWaitMs)
+            val end = System.currentTimeMillis() + max(2500L, totalWaitMs)
             while (System.currentTimeMillis() < end) {
                 if (`in`.available() < 16) { try { Thread.sleep(20) } catch (_: Exception) {}; continue }
                 val hdr = readExact(`in`, 16) ?: break
@@ -246,13 +248,14 @@ class TvWebActivity : Activity() {
                 val extra     = beInt(hdr,12)
                 debug.append("GCDH frame: len=$payloadLen type=$msgType extra=$extra\n")
 
-                // Some firmwares send len=0 for 1012; accept it
                 if (payloadLen < 0 || payloadLen > 8*1024*1024) {
                     debug.append("Aborting: bad len\n"); break
                 }
                 val comp = if (payloadLen == 0) ByteArray(0) else readExact(`in`, payloadLen) ?: break
                 val inflated = tryInflate(comp) ?: comp
                 chunks += msgType to inflated
+                // quick peek
+                debug.append("-- type=$msgType textLen=${inflated.size}\n")
             }
             return chunks
         }
@@ -294,7 +297,6 @@ class TvWebActivity : Activity() {
                     }
                 } catch (_: Exception) {}
 
-                // Fallback: player.<ID> pattern
                 Regex("""player\.([0-9]+)""").findAll(text).forEach { m ->
                     val id = m.groupValues[1]
                     if (seen.add(id)) {
@@ -305,7 +307,7 @@ class TvWebActivity : Activity() {
             return out
         }
 
-        // ---- typed socket helpers ----
+        // ---- sockets ----
         private fun talkToControlAll(
             ip: String,
             port: Int,
@@ -315,11 +317,11 @@ class TvWebActivity : Activity() {
             var sock: Socket? = null
             return try {
                 debug.append("Connecting $ip:$port\n")
-                sock = Socket(ip, port).apply { soTimeout = 3000 }
+                sock = Socket(ip, port).apply { soTimeout = 3500 }
                 val out: OutputStream = sock.getOutputStream()
                 val `in`: InputStream = sock.getInputStream()
                 for (f in frames) { out.write(f); out.flush(); try { Thread.sleep(50) } catch (_: Exception) {} }
-                readGcdhFrames(`in`, totalWaitMs = 3000L, debug)
+                readGcdhFrames(`in`, totalWaitMs = 3500L, debug)
             } catch (e: Exception) {
                 debug.append("Error $ip:$port -> ${e.message}\n")
                 emptyList()
@@ -342,6 +344,38 @@ class TvWebActivity : Activity() {
             val chans = parseChannelsFromTexts(framesIn, ip, debug)
             if (chans.length() == 0) debug.append("Parsed 0 channels on $port\n")
             return chans
+        }
+
+        private fun loginOver4113(ip: String, port: Int, debug: StringBuilder): Boolean {
+            var sock: Socket? = null
+            return try {
+                debug.append("Connecting $ip:$port (XML login)\n")
+                sock = Socket(ip, port).apply { soTimeout = 3000 }
+                val out: OutputStream = sock.getOutputStream()
+                val `in`: InputStream = sock.getInputStream()
+
+                val uuid = UUID.randomUUID().toString()
+                val xml = "<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>" +
+                        "<Command request=\"998\"><uuid>$uuid</uuid><data>Future</data></Command>"
+                val payload = xml.toByteArray(Charsets.UTF_8)
+
+                // PC log shows they send 108 bytes; device doesn’t need a length prefix,
+                // just the plain XML seems enough (many firmwares accept both).
+                out.write(payload); out.flush()
+                Thread.sleep(80)
+
+                // Read whatever comes back (we just want the magic banner/echo)
+                val buf = ByteArray(512)
+                val n = try { `in`.read(buf) } catch (_: Exception) { -1 }
+                val s = if (n > 0) String(buf, 0, n, Charsets.UTF_8) else ""
+                debug.append("XML login reply bytes=$n\n")
+                if (n <= 0) false else true
+            } catch (e: Exception) {
+                debug.append("XML login error: ${e.message}\n")
+                false
+            } finally {
+                try { sock?.close() } catch (_: Exception) {}
+            }
         }
 
         // ===== HTTP SWEEP (optional) =====
