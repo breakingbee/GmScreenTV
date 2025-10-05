@@ -41,7 +41,7 @@
     <span id="fetchInfo" class="mono" style="margin:10px;"></span>
   </div>
 
-  <!-- Play by ID (still handy) -->
+  <!-- Play by ID -->
   <div class="row">
     <input id="chanId" class="txt" placeholder="Channel ID (e.g., 22621080)">
     <button class="btn" id="btnPlayById">Play in VLC</button>
@@ -57,11 +57,9 @@
 
 <script>
 (function(){
-  // remote buttons
   function sendKey(k){ try{ if(window.NativeBridge){ NativeBridge.sendRcuKey(String(k)); } }catch(e){} }
   document.querySelectorAll('.btn[data-key]').forEach(b=> b.onclick=()=>sendKey(b.getAttribute('data-key')) );
 
-  // IP helpers
   function getIp(){ try{ return NativeBridge.getStbIp(); }catch(e){ return ""; } }
   function setIp(newIp){ try{ NativeBridge.setStbIp(newIp); }catch(e){} }
   function renderIp(){
@@ -75,14 +73,12 @@
   };
   renderIp();
 
-  // Play by ID
   document.getElementById('btnPlayById').onclick = function(){
     var id = (document.getElementById('chanId').value||"").trim();
     if(!id){ alert("Enter a channel ID, e.g., 22621080"); return; }
     try{ NativeBridge.openChannelById(id); }catch(e){}
   };
 
-  // List rendering
   function row(name, id, url){
     var div = document.createElement('div'); div.className='item';
     var left = document.createElement('div'); left.className='name';
@@ -98,16 +94,15 @@
     arr.forEach(it => list.appendChild(row(it.name||'Channel', it.id||'', it.url)));
   }
 
-  // Fetch channels via control protocol (TV -> STB direct)
   document.getElementById('btnFetch').onclick = function(){
     document.getElementById('fetchInfo').textContent = "Requesting...";
-    setTimeout(function(){ // let UI update
+    setTimeout(function(){
       try{
         var json = NativeBridge.fetchChannelsFromStb();
         var arr = []; try { arr = JSON.parse(json); } catch(e){}
         renderList(arr);
         document.getElementById('fetchInfo').textContent = arr.length ? "OK" : "No channels (will refine)";
-        if (!arr.length) alert("No channels returned yet. If your PC app is open, close it and try again.\nIf still empty, tell me and we’ll add the decrypt step.");
+        if (!arr.length) alert("No channels returned yet.\nClose the PC app (so it doesn’t hold the control socket) and try again.");
       }catch(e){
         document.getElementById('fetchInfo').textContent = "Failed";
         alert("Fetch failed.");
@@ -115,16 +110,11 @@
     }, 10);
   };
 
-  // Auto-detect: UDP first, then (optional) HTTP fallback
   function deviceRow(ip, name){
     var div = document.createElement('div'); div.className='device';
     var left = document.createElement('div'); left.textContent = (name||'STB') + "  ("+ip+")";
     var btn = document.createElement('button'); btn.className='btn tiny'; btn.textContent='Connect';
-    btn.onclick = function(){
-      setIp(ip);
-      alert("Connected to: "+ip);
-      renderIp();
-    };
+    btn.onclick = function(){ setIp(ip); alert("Connected to: "+ip); renderIp(); };
     div.appendChild(left); div.appendChild(btn);
     return div;
   }
@@ -145,4 +135,3 @@
 </script>
 </body>
 </html>
-
