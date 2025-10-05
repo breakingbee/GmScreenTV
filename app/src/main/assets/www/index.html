@@ -23,11 +23,9 @@
 <body>
   <h2>GmScreen Remote</h2>
 
-  <!-- Auto-detect -->
   <div class="row"><button class="btn" id="btnScan">Auto-detect STB</button></div>
   <div class="row"><div id="devices"></div></div>
 
-  <!-- Minimal remote -->
   <div class="row">
     <button class="btn" data-key="42">POWER</button>
     <button class="btn" data-key="13">1</button>
@@ -35,27 +33,23 @@
     <button class="btn" data-key="15">3</button>
   </div>
 
-  <!-- Fetch channels -->
   <div class="row">
     <button class="btn" id="btnFetch">Fetch channels (aggressive)</button>
+    <button class="btn" id="btnLocal">Load local channel list</button>
     <span id="fetchInfo" class="mono" style="margin:10px;"></span>
   </div>
 
-  <!-- Play by ID -->
   <div class="row">
     <input id="chanId" class="txt" placeholder="Channel ID (e.g., 22621080)">
     <button class="btn" id="btnPlayById">Play in VLC</button>
   </div>
 
-  <!-- Result list -->
   <div class="row"><div id="chanCount" style="margin:6px 0;"></div></div>
   <div class="row"><div id="list"></div></div>
 
-  <!-- Debug -->
   <div class="row"><button class="btn tiny" id="btnShowDebug">Show last debug</button></div>
   <div class="row"><div id="debug" class="mono" style="display:none"></div></div>
 
-  <!-- Change IP -->
   <div class="row"><button id="changeIp" class="btn">Change IP</button></div>
   <div id="ip"></div>
 
@@ -77,12 +71,6 @@
   };
   renderIp();
 
-  document.getElementById('btnPlayById').onclick = function(){
-    var id = (document.getElementById('chanId').value||"").trim();
-    if(!id){ alert("Enter a channel ID, e.g., 22621080"); return; }
-    try{ NativeBridge.openChannelById(id); }catch(e){}
-  };
-
   function row(name, id, url){
     var div = document.createElement('div'); div.className='item';
     var left = document.createElement('div'); left.className='name';
@@ -98,38 +86,41 @@
     arr.forEach(it => list.appendChild(row(it.name||'Channel', it.id||'', it.url)));
   }
 
-  // === Local fallback Astra channels ===
-  async function loadLocalChannels() {
-    try {
-      const res = await fetch("channels_data.json");
-      const data = await res.json();
-      const stbIp = getIp();
-      data.forEach(ch => ch.url = ch.url.replace("<STB-IP>", stbIp || "192.168.1.206"));
-      renderList(data);
-      document.getElementById('fetchInfo').textContent = "Loaded Astra 19.2°E local channels";
-    } catch (e) {
-      console.error("Local channel load failed", e);
-      alert("Failed to load local channel list.");
-    }
-  }
+  document.getElementById('btnPlayById').onclick = function(){
+    var id = (document.getElementById('chanId').value||"").trim();
+    if(!id){ alert("Enter a channel ID, e.g., 22621080"); return; }
+    try{ NativeBridge.openChannelById(id); }catch(e){}
+  };
 
-  // === Fetch button override ===
+  // === fetch from STB ===
   document.getElementById('btnFetch').onclick = function(){
-    document.getElementById('fetchInfo').textContent = "Requesting STB...";
+    document.getElementById('fetchInfo').textContent = "Requesting...";
     setTimeout(function(){
       try{
         var json = NativeBridge.fetchChannelsFromStb();
         var arr = []; try { arr = JSON.parse(json); } catch(e){}
+        renderList(arr);
         if (arr.length) {
-          renderList(arr);
-          document.getElementById('fetchInfo').textContent = "STB OK";
+          document.getElementById('fetchInfo').textContent = "OK";
         } else {
-          loadLocalChannels();
+          document.getElementById('fetchInfo').textContent = "No channels (see Debug)";
+          document.getElementById('debug').style.display='block';
+          document.getElementById('debug').textContent = NativeBridge.getLastDebug();
         }
       }catch(e){
-        loadLocalChannels();
+        document.getElementById('fetchInfo').textContent = "Failed";
       }
     }, 10);
+  };
+
+  // === Load local list from channels_data.json ===
+  document.getElementById('btnLocal').onclick = function(){
+    fetch("channels_data.json").then(r=>r.json()).then(arr=>{
+      renderList(arr);
+      document.getElementById('fetchInfo').textContent = "Loaded Astra 19.2°E local channels";
+    }).catch(e=>{
+      alert("Failed to load local channel list: "+e);
+    });
   };
 
   document.getElementById('btnShowDebug').onclick = function(){
@@ -137,15 +128,6 @@
     box.style.display='block';
     box.textContent = NativeBridge.getLastDebug();
   };
-
-  function deviceRow(ip, name){
-    var div = document.createElement('div'); div.className='device';
-    var left = document.createElement('div'); left.textContent = (name||'STB') + "  ("+ip+")";
-    var btn = document.createElement('button'); btn.className='btn tiny'; btn.textContent='Connect';
-    btn.onclick = function(){ setIp(ip); alert("Connected to: "+ip); renderIp(); };
-    div.appendChild(left); div.appendChild(btn);
-    return div;
-  }
 
   document.getElementById('btnScan').onclick = function(){
     var box = document.getElementById('devices'); box.innerHTML = 'Listening for UDP beacons...';
@@ -159,6 +141,15 @@
       box.textContent = 'Scan failed.';
     }
   };
+
+  function deviceRow(ip, name){
+    var div = document.createElement('div'); div.className='device';
+    var left = document.createElement('div'); left.textContent = (name||'STB') + "  ("+ip+")";
+    var btn = document.createElement('button'); btn.className='btn tiny'; btn.textContent='Connect';
+    btn.onclick = function(){ setIp(ip); alert("Connected to: "+ip); renderIp(); };
+    div.appendChild(left); div.appendChild(btn);
+    return div;
+  }
 })();
 </script>
 </body>
