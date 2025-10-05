@@ -2,180 +2,125 @@
 <html>
 <head>
 <meta charset="utf-8"/>
-<title>GmScreen (offline)</title>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>GmScreen (Online)</title>
 <style>
-  :root { --bg:#0e0f12; --card:#1a1c21; --text:#e9eef5; --muted:#9aa3ad; --brand:#3b82f6;}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-  header{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:14px 18px;background:#121419;box-shadow:0 1px 0 rgba(255,255,255,.06) inset}
-  h1{font-size:18px;margin:0;font-weight:600}
-  .btn{background:var(--brand);border:0;border-radius:10px;color:#fff;padding:10px 14px;font-weight:700;cursor:pointer}
-  .btn.secondary{background:#2b2f37}
-  .btn.tiny{padding:7px 10px;border-radius:8px;font-weight:600}
-  .wrap{padding:16px;display:grid;grid-template-columns:360px 1fr;gap:16px}
-  .card{background:var(--card);border-radius:12px;padding:14px;border:1px solid rgba(255,255,255,.07)}
-  .title{font-weight:700;margin:0 0 10px 0}
-  .muted{color:var(--muted);font-size:13px}
-  .row{display:flex;gap:8px;align-items:center}
-  input[type="text"]{background:#0f1217;border:1px solid #2a2e36;border-radius:8px;color:var(--text);padding:9px 10px;outline:none;width:100%}
-  .list{display:flex;flex-direction:column;gap:8px;max-height:58vh;overflow:auto}
-  .item{display:flex;justify-content:space-between;align-items:center;background:#12151b;border:1px solid #242833;border-radius:10px;padding:10px 12px}
+  body{background:#111;color:#eee;margin:0;font-family:system-ui,Arial}
+  h2{margin:14px 0 8px;text-align:center}
+  .row{display:flex;justify-content:center;flex-wrap:wrap;margin:6px 0}
+  .btn{margin:6px;padding:10px 14px;background:#1f6feb;color:#fff;font-weight:600;border:none;border-radius:6px;min-width:56px;font-size:16px}
+  .btn:active{transform:translateY(1px)}
+  .tiny{min-width:46px;font-size:14px;padding:7px 10px}
+  #ip{font-size:13px;color:#aaa;text-align:center;margin:6px 0 12px}
+  #list{max-height:58vh;overflow:auto;width:92%;max-width:1100px}
+  .item{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#1b1b1b;margin:6px 0;border-radius:6px}
   .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%}
-  .pill{font-size:12px;color:#c9d2dc;background:#1f2430;border:1px solid #2b3140;border-radius:999px;padding:2px 8px}
-  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap}
+  input.txt{min-width:360px;padding:10px;border-radius:6px;border:1px solid #444;background:#0f0f0f;color:#eee}
+  .device{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#152238;margin:6px 0;border-radius:6px;width:92%;max-width:1100px}
+  .mono{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:#ddd;white-space:pre-wrap;max-height:26vh;overflow:auto;background:#0e0e0e;border:1px solid #333;border-radius:6px;padding:6px;width:92%;max-width:1100px}
 </style>
 </head>
 <body>
-<header>
-  <h1>GmScreen TV — Offline lists</h1>
+  <h2>GmScreen (Online)</h2>
+
   <div class="row">
-    <button id="btnChangeIp" class="btn tiny secondary">Change IP</button>
+    <button class="btn tiny" id="btnScan">Auto-detect STB</button>
+    <button class="btn tiny" id="btnChangeIp">Change IP</button>
+    <button class="btn tiny" id="btnFetch">Fetch channels</button>
   </div>
-</header>
+  <div id="ip"></div>
 
-<div class="wrap">
-  <!-- Satellites -->
-  <section class="card">
-    <div class="title">Satellites (offline)</div>
-    <div id="satState" class="muted mono">Loading…</div>
-    <div id="satList" class="list"></div>
-  </section>
+  <div class="row"><div id="devices"></div></div>
 
-  <!-- Channels -->
-  <section class="card">
-    <div class="title row">
-      <span>Channels</span>
-      <span id="chanCount" class="pill">0</span>
-    </div>
-    <div class="row" style="margin-bottom:10px">
-      <input id="search" type="text" placeholder="Search channel name or ServiceID…"/>
-      <button id="btnClear" class="btn tiny secondary">Clear</button>
-    </div>
-    <div id="chanList" class="list"></div>
-  </section>
-</div>
+  <div class="row">
+    <input id="chanId" class="txt" placeholder="Channel ID (e.g., 22621080)">
+    <button class="btn tiny" id="btnPlayById">Play</button>
+  </div>
+
+  <div class="row"><input id="filter" class="txt" placeholder="Search channel name or ServiceID…"></div>
+
+  <div class="row"><div id="count"></div></div>
+  <div class="row"><div id="list"></div></div>
+
+  <div class="row"><button class="btn tiny" id="btnShowDebug">Show debug</button></div>
+  <div class="row"><div id="debug" class="mono" style="display:none"></div></div>
 
 <script>
 (function(){
-  // ---- helpers ----
-  function getIp(){ try{return NativeBridge.getStbIp()}catch(_){return ""} }
-  function setIp(v){ try{NativeBridge.setStbIp(v)}catch(_){ } }
-  function ensureIp(){
-    let ip = getIp();
-    if(!ip){
-      ip = prompt("Enter your STB IP (e.g., 192.168.1.206)") || "";
-      if(ip) setIp(ip);
-    }
-    return ip;
+  function getIp(){ try{ return NativeBridge.getStbIp(); }catch(e){ return ""; } }
+  function setIp(ip){ try{ NativeBridge.setStbIp(ip); }catch(e){} }
+  function renderIp(){ var s=getIp(); document.getElementById('ip').textContent = s?("Connected to: "+s):"Not connected"; }
+  renderIp();
+
+  function deviceRow(ip, name){
+    var div=document.createElement('div'); div.className='device';
+    var left=document.createElement('div'); left.textContent=(name||'STB')+" ("+ip+")";
+    var btn=document.createElement('button'); btn.className='btn tiny'; btn.textContent='Use this';
+    btn.onclick=function(){ setIp(ip); alert("Using "+ip); renderIp(); };
+    div.appendChild(left); div.appendChild(btn); return div;
   }
-  function openInVlc(url){ try{ NativeBridge.openInVlc(url) }catch(_){ } }
 
-  // ---- offline data paths (RELATIVE!) ----
-  const SATELLITES_JSON = 'data/satellites.json'; // <== important: NO leading slash
-  // each item in satellites.json has { name, key, file }
-  // example file for Astra: data/astra_19e.json
-
-  // ---- state ----
-  let allChannels = [];   // currently loaded satellite channels
-  let rawChannels = [];   // unfiltered copy
-
-  // ---- UI refs ----
-  const satState = document.getElementById('satState');
-  const satList  = document.getElementById('satList');
-  const chanList = document.getElementById('chanList');
-  const chanCount= document.getElementById('chanCount');
-  const search   = document.getElementById('search');
-
-  // ---- IP button ----
-  document.getElementById('btnChangeIp').onclick = () => {
-    const cur = getIp() || "";
-    const ip = prompt("Enter STB IP", cur);
-    if(ip){ setIp(ip); alert("Saved: "+ip); }
+  document.getElementById('btnChangeIp').onclick=function(){
+    var cur=getIp()||""; var ip=prompt("Enter STB IP",cur); if(ip){ setIp(ip); renderIp(); }
   };
 
-  // ---- render helpers ----
-  function renderSatellites(items){
-    satList.innerHTML = '';
-    items.forEach(s => {
-      const row = document.createElement('div');
-      row.className = 'item';
-      const left = document.createElement('div');
-      left.className = 'name';
-      left.textContent = s.name || s.key || s.file;
-      const btn = document.createElement('button');
-      btn.className = 'btn tiny';
-      btn.textContent = 'Open';
-      btn.onclick = ()=> loadSatellite(s.file, s);
-      row.appendChild(left); row.appendChild(btn);
-      satList.appendChild(row);
-    });
-  }
-
-  function renderChannels(items){
-    chanList.innerHTML = '';
-    chanCount.textContent = items.length;
-    items.forEach(c => {
-      const row = document.createElement('div');
-      row.className = 'item';
-      const left = document.createElement('div');
-      left.className = 'name';
-      left.textContent = (c.ServiceName || c.name || 'Channel') + '  [' + (c.ServiceID || c.id) + ']';
-      const btn = document.createElement('button');
-      btn.className = 'btn tiny';
-      btn.textContent = 'Play';
-      btn.onclick = () => {
-        const id = String(c.ServiceID || c.id || '').trim();
-        if(!id){ alert('Missing ServiceID'); return; }
-        const ip = ensureIp(); if(!ip){ alert('No IP set.'); return; }
-        openInVlc(`http://${ip}:8085/player.${id}`);
-      };
-      row.appendChild(left); row.appendChild(btn);
-      chanList.appendChild(row);
-    });
-  }
-
-  // ---- load a satellite file ----
-  async function loadSatellite(file, meta){
-    allChannels = [];
-    rawChannels = [];
-    renderChannels([]);
+  document.getElementById('btnScan').onclick=function(){
+    var box=document.getElementById('devices'); box.textContent='Scanning…';
     try{
-      const path = 'data/' + file;   // <== relative path
-      const json = await fetch(path).then(r => r.json());
-      // expect array of objects with ServiceID & ServiceName
-      rawChannels = Array.isArray(json) ? json : (json.items||json.channels||[]);
-      allChannels = rawChannels.slice();
-      renderChannels(allChannels);
-    }catch(e){
-      alert('Failed to load ' + file + ' : ' + e);
-    }
+      var json = NativeBridge.discoverUdp25860(3000);
+      var arr=[]; try{ arr=JSON.parse(json) }catch(e){}
+      box.innerHTML='';
+      if(arr.length){ arr.forEach(it=> box.appendChild(deviceRow(it.ip,it.name))); }
+      else { box.textContent='No devices found.'; }
+    }catch(e){ box.textContent='Scan failed.'; }
+  };
+
+  document.getElementById('btnPlayById').onclick=function(){
+    var id=(document.getElementById('chanId').value||"").trim();
+    if(!id) return alert("Enter an ID"); try{ NativeBridge.openChannelById(id); }catch(e){}
+  };
+
+  function row(name,id,url){
+    var div=document.createElement('div'); div.className='item';
+    var left=document.createElement('div'); left.className='name'; left.textContent=name+"  ["+id+"]";
+    var play=document.createElement('button'); play.className='btn tiny'; play.textContent='Play';
+    play.onclick=function(){ try{ NativeBridge.openInVlc(url) }catch(e){} };
+    div.appendChild(left); div.appendChild(play); return div;
+  }
+  function render(list){
+    var listDiv=document.getElementById('list'); listDiv.innerHTML='';
+    document.getElementById('count').textContent="Channels: "+list.length;
+    list.forEach(it=> listDiv.appendChild(row(it.name||("Channel "+it.id), it.id, it.url)));
   }
 
-  // ---- search box ----
-  function applyFilter(){
-    const q = (search.value||'').trim().toLowerCase();
-    if(!q){ renderChannels(rawChannels); return; }
-    const out = rawChannels.filter(o=>{
-      const name = (o.ServiceName || o.name || '').toLowerCase();
-      const id = String(o.ServiceID || o.id || '');
-      return name.includes(q) || id.includes(q);
-    });
-    renderChannels(out);
-  }
-  search.oninput = applyFilter;
-  document.getElementById('btnClear').onclick = ()=>{ search.value=''; applyFilter(); };
-
-  // ---- initial load of satellite list ----
-  (async function init(){
+  let channels = [];
+  document.getElementById('btnFetch').onclick=function(){
+    if(!getIp()) { alert("Set STB IP first (Scan or Change IP)."); return; }
+    channels = [];
+    document.getElementById('count').textContent = "Fetching…";
     try{
-      const sats = await fetch(SATELLITES_JSON).then(r => r.json());
-      satState.textContent = 'Choose a satellite';
-      renderSatellites(sats);
-    }catch(e){
-      satState.textContent = 'Failed to load satellites.json: ' + e;
-    }
-  })();
+      var json = NativeBridge.fetchChannelsFromStb();
+      try { channels = JSON.parse(json) } catch(e) { channels = [] }
+      render(channels);
+      if (!channels.length) {
+        alert("No channels parsed. Open Debug to inspect.");
+      }
+    }catch(e){ alert("Fetch failed."); }
+  };
+
+  document.getElementById('btnShowDebug').onclick=function(){
+    var box=document.getElementById('debug');
+    box.style.display='block';
+    try{ box.textContent = NativeBridge.getLastDebug(); }catch(e){ box.textContent="(no debug)"; }
+  };
+
+  document.getElementById('filter').oninput=function(){
+    var q=this.value.toLowerCase().trim();
+    if(!q) return render(channels);
+    var f=channels.filter(c =>
+      (c.name||"").toLowerCase().includes(q) || (c.id||"").toLowerCase().includes(q)
+    );
+    render(f);
+  };
 })();
 </script>
 </body>
