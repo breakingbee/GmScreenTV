@@ -25,7 +25,7 @@
   .item{background:var(--panel2);border:1px solid #313846;border-radius:12px;padding:10px 12px;margin:8px 0;display:flex;align-items:center;justify-content:space-between}
   .item.playing{border-color:#3a6cff; box-shadow:0 0 0 2px #3a6cff55 inset}
   .name{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%}
-  .play{min-width:86px}
+  .play{min-width:140px}
   .idx{font-size:12px;color:#cfe3ff;background:#2d3746;border-radius:999px;padding:2px 8px;margin-left:8px}
   .sid{font-size:12px;color:#9ab0c9;margin-left:8px}
   .focusable{outline:none}
@@ -54,7 +54,7 @@
       <button id="btnFetchLong" class="btn focusable">Fetch channels (long listen)</button>
       <button id="btnClear" class="btn danger alt focusable">Clear list</button>
     </div>
-    <div class="hint">Keeps socket open ~12s and merges everything the STB pushes.</div>
+    <div class="hint">Socket open ~12s. We tune before playing so VLC doesn’t show black.</div>
 
     <h2 style="margin-top:18px;">Play by ID</h2>
     <input id="byId" class="txt focusable" placeholder="Channel ID (e.g., 22621080)">
@@ -84,7 +84,8 @@
   function getIp(){ try{return NativeBridge.getStbIp()}catch(_){return""} }
   function setIp(v){ try{NativeBridge.setStbIp(v)}catch(_){ } }
   function fetchOnce(){ try{return JSON.parse(NativeBridge.fetchChannelsFromStb()||"[]")}catch(_){return[]} }
-  function openVlc(u){ try{NativeBridge.openInVlc(u)}catch(_){ } }
+  function tuneAndPlay(id, idx){ try{ NativeBridge.tuneAndPlay(String(id), (idx==null?-1:idx|0)); }catch(_){ } }
+  function openById(id){ try{ NativeBridge.openChannelById(String(id)); }catch(_){ } }
   function getDebug(){ try{return NativeBridge.getLastDebug()}catch(_){return""} }
 
   let all=[], visible=[], seen=new Set();
@@ -96,10 +97,13 @@
     const left=document.createElement('div'); left.className='name';
     left.textContent=it.name||('Channel '+(it.id||'')); const sid=document.createElement('span'); sid.className='sid'; sid.textContent=`[${it.id||''}]`; left.appendChild(sid);
     if(typeof it.idx==='number'){ const ix=document.createElement('span'); ix.className='idx'; ix.textContent='Idx '+it.idx; left.appendChild(ix); }
-    const btn=document.createElement('button'); btn.className='btn good play focusable'; btn.textContent='Play in VLC';
-    btn.onclick=()=>openVlc(it.url);
+    const btn=document.createElement('button'); btn.className='btn good play focusable'; btn.textContent='Tune + VLC';
+    btn.onclick=()=>tuneAndPlay(it.id, it.idx);
     div.appendChild(left); div.appendChild(btn);
-    div.onkeydown=e=>{ if(e.key==='Enter'){ openVlc(it.url); e.preventDefault(); } if(e.key==='ArrowRight'){ btn.focus(); e.preventDefault(); } };
+    div.onkeydown=e=>{
+      if(e.key==='Enter'){ tuneAndPlay(it.id, it.idx); e.preventDefault(); }
+      if(e.key==='ArrowRight'){ btn.focus(); e.preventDefault(); }
+    };
     return div;
   }
   function render(){
@@ -126,7 +130,7 @@
       const before=all.length;
       merge(fetchOnce());
       const growth=all.length-before; stagnant = growth?0:stagnant+1;
-      if(stagnant>=2) break; // stop early if two passes with nothing new
+      if(stagnant>=2) break;
       await sleep(1500);
     }
     $('#status').textContent=`Done. Total ${all.length}`;
@@ -134,7 +138,7 @@
   }
 
   $('#search').oninput=render;
-  $('#btnPlayId').onclick=()=>{ const id=($('#byId').value||'').trim(); const ip=getIp(); if(!id||!ip) return; openVlc(`http://${ip}:8085/player.${id}`); };
+  $('#btnPlayId').onclick=()=>{ const id=($('#byId').value||'').trim(); if(!id) return; openById(id); };
   $('#btnDiscover').onclick=()=>{ try{ const arr=JSON.parse(NativeBridge.discoverUdp25860(3000)||'[]'); if(!arr.length) return alert('No STB beacons.'); setIp(arr[0].ip); setIpLine(); alert('Using '+arr[0].ip); }catch(_){ alert('Discover failed'); } };
   $('#btnIp').onclick=()=>{ const cur=getIp()||''; const v=prompt('Enter STB IP', cur); if(v){ setIp(v.trim()); setIpLine(); } };
   $('#btnFetchLong').onclick=longListen;
