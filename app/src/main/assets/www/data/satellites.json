@@ -1,0 +1,20 @@
+[
+  {
+    "id": "astra_19e",
+    "name": "Astra 19.2°E",
+    "description": "Europe – popular satellite carrying Sky, Canal+, RTL, ZDF, ARD and many others",
+    "file": "astra_19e.json"
+  },
+  {
+    "id": "hotbird_13e",
+    "name": "Hotbird 13°E",
+    "description": "European and MENA channels",
+    "file": "hotbird_13e.json"
+  },
+  {
+    "id": "nilesat_7w",
+    "name": "Nilesat 7°W",
+    "description": "Arabic and North African channels",
+    "file": "nilesat_7w.json"
+  }
+]
