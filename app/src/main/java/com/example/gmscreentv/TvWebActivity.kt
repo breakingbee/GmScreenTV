@@ -88,7 +88,6 @@ class TvWebActivity : Activity() {
         }
 
         // ─── Auto-detect STB ────────────────────────────────────────────────────
-        // 1) Listen UDP 25860 (STB beacons)  2) Quick HTTP sweep on :8085
         @JavascriptInterface
         fun discoverUdp25860(timeoutMs: Int): String {
             val out = linkedSetOf<String>()
@@ -110,7 +109,6 @@ class TvWebActivity : Activity() {
             val arr = JSONArray()
             out.forEach { ip -> arr.put(JSONObject().put("ip", ip).put("name", "STB (UDP 25860)").put("playlist","")) }
 
-            // quick HTTP scan (optional but useful)
             val prefix = localSubnetPrefix()
             if (prefix != null) {
                 val tasks = (1..254).map { h ->
@@ -131,19 +129,23 @@ class TvWebActivity : Activity() {
             return arr.toString()
         }
 
-        private fun localSubnetPrefix(): String? = try {
-            val ifaces = NetworkInterface.getNetworkInterfaces()
-            for (ni in ifaces) {
-                val addrs = ni.inetAddresses
-                while (addrs.hasMoreElements()) {
-                    val a = addrs.nextElement()
-                    if (a is Inet4Address && !a.isLoopbackAddress) {
-                        val p = a.hostAddress.split(".")
-                        if (p.size == 4) return "${p[0]}.${p[1]}.${p[2]}"
+        // FIXED: block body (no expression body with returns)
+        private fun localSubnetPrefix(): String? {
+            try {
+                val ifaces = NetworkInterface.getNetworkInterfaces()
+                for (ni in ifaces) {
+                    val addrs = ni.inetAddresses
+                    while (addrs.hasMoreElements()) {
+                        val a = addrs.nextElement()
+                        if (a is Inet4Address && !a.isLoopbackAddress) {
+                            val p = a.hostAddress.split(".")
+                            if (p.size == 4) return "${p[0]}.${p[1]}.${p[2]}"
+                        }
                     }
                 }
-            }; null
-        } catch (_: Exception) { null }
+            } catch (_: Exception) {}
+            return null
+        }
 
         // ─── Control protocol (GCDH + zlib) ─────────────────────────────────────
         @JavascriptInterface
@@ -154,21 +156,16 @@ class TvWebActivity : Activity() {
             val debug = StringBuilder()
             val ports = intArrayOf(20000, 4113, 8888)
 
-            // Build frames the STB expects (mirrors Wireshark):
             val seq = mutableListOf<ByteArray>()
-            // 1) initial info
             seq += jsonFrame("""{"request":"1012"}""")
-            // 2) make sure we’re on normal TV list (not fav)
             seq += jsonFrame("""{"request":"1007","IsFavList":"0","SelectListType":"0"}""")
-            // 3) ask for ranges (chunked). Big enough to cover full bouquet.
+
             val windows = arrayOf(
                 0 to 199, 200 to 399, 400 to 599, 600 to 799, 800 to 999,
                 1000 to 1299, 1300 to 1599, 1600 to 1899, 1900 to 2199, 2200 to 2499
             )
-            windows.forEach { (a,b) ->
-                seq += jsonFrame("""{"request":"0","FromIndex":"$a","ToIndex":"$b"}""")
-            }
-            // 4) heartbeat sometimes needed
+            windows.forEach { (a,b) -> seq += jsonFrame("""{"request":"0","FromIndex":"$a","ToIndex":"$b"}""") }
+
             seq += jsonFrame("""{"request":"26"}""")
 
             var result = JSONArray()
@@ -194,10 +191,8 @@ class TvWebActivity : Activity() {
                 val out: OutputStream = sock.getOutputStream()
                 val inn: InputStream = sock.getInputStream()
 
-                // Send all frames (small spacing like PC client)
                 for (f in frames) { out.write(f); out.flush(); try { Thread.sleep(50) } catch (_: Exception) {} }
 
-                // Read multiple GCDH frames
                 val framesIn = readGcdhFrames(inn, 3000, debug)
                 if (framesIn.isEmpty()) { debug.append("No GCDH on $port\n"); return JSONArray() }
 
@@ -265,7 +260,6 @@ class TvWebActivity : Activity() {
             for ((type, bytes) in all) {
                 val text = try { String(bytes, Charsets.UTF_8) } catch (_: Exception) { "" }
                 debug.append("-- type=$type len=${text.length}\n")
-                // Try JSON array of objects (what we saw in your dumps)
                 try {
                     if (text.trim().startsWith("[")) {
                         val arr = JSONArray(text)
@@ -281,7 +275,6 @@ class TvWebActivity : Activity() {
                         }
                     }
                 } catch (_: Exception) {}
-                // Fallback: scrape player.<digits>
                 Regex("""player\.([0-9]+)""").findAll(text).forEach { m ->
                     val id = m.groupValues[1]
                     if (seen.add(id)) {
