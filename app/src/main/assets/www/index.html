@@ -2,124 +2,124 @@
 <html>
 <head>
 <meta charset="utf-8"/>
-<title>GmScreen (Online)</title>
+<title>GmScreen TV Remote</title>
 <style>
-  body{background:#111;color:#eee;margin:0;font-family:system-ui,Arial}
-  h2{margin:14px 0 8px;text-align:center}
-  .row{display:flex;justify-content:center;flex-wrap:wrap;margin:6px 0}
-  .btn{margin:6px;padding:10px 14px;background:#1f6feb;color:#fff;font-weight:600;border:none;border-radius:6px;min-width:56px;font-size:16px}
-  .btn:active{transform:translateY(1px)}
-  .tiny{min-width:46px;font-size:14px;padding:7px 10px}
-  #ip{font-size:13px;color:#aaa;text-align:center;margin:6px 0 12px}
-  #list{max-height:58vh;overflow:auto;width:92%;max-width:1100px}
-  .item{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#1b1b1b;margin:6px 0;border-radius:6px}
-  .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%}
-  input.txt{min-width:360px;padding:10px;border-radius:6px;border:1px solid #444;background:#0f0f0f;color:#eee}
-  .device{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#152238;margin:6px 0;border-radius:6px;width:92%;max-width:1100px}
-  .mono{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:#ddd;white-space:pre-wrap;max-height:26vh;overflow:auto;background:#0e0e0e;border:1px solid #333;border-radius:6px;padding:6px;width:92%;max-width:1100px}
+  body {
+    background:#101010;
+    color:white;
+    margin:0;
+    font-family:Arial,Helvetica,sans-serif;
+    overflow:hidden;
+  }
+  h2 {
+    text-align:center;
+    margin:20px 0 10px;
+  }
+  .btn {
+    margin:6px;
+    padding:10px 14px;
+    background:#0040ff;
+    color:white;
+    font-weight:bold;
+    border:none;
+    border-radius:6px;
+    min-width:80px;
+    font-size:16px;
+  }
+  .btn:focus {
+    outline:3px solid #ffcc00;
+  }
+  #list {
+    height:60vh;
+    overflow-y:auto;
+    padding:10px;
+    margin:0 auto;
+    max-width:900px;
+  }
+  .item {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    background:#222;
+    border-radius:6px;
+    margin:6px 0;
+    padding:10px;
+  }
+  .name {
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    max-width:75%;
+  }
 </style>
 </head>
 <body>
-  <h2>GmScreen (Online)</h2>
-
-  <div class="row">
-    <button class="btn tiny" id="btnScan">Auto-detect STB</button>
-    <button class="btn tiny" id="btnChangeIp">Change IP</button>
-    <button class="btn tiny" id="btnFetch">Fetch channels</button>
+  <h2>GmScreen TV</h2>
+  <div style="text-align:center;">
+    <button id="btnAuto" class="btn">Auto-detect STB</button>
+    <button id="btnChange" class="btn">Change IP</button>
+    <button id="btnFetch" class="btn">Fetch Channels</button>
   </div>
-  <div id="ip"></div>
+  <div style="text-align:center;margin-top:10px;">Connected to: <span id="ip">–</span></div>
 
-  <div class="row"><div id="devices"></div></div>
+  <div id="list"></div>
 
-  <div class="row">
-    <input id="chanId" class="txt" placeholder="Channel ID (e.g., 22621080)">
-    <button class="btn tiny" id="btnPlayById">Play</button>
+  <div style="text-align:center;margin-top:10px;">
+    <button id="btnDebug" class="btn">Show debug</button>
   </div>
 
-  <div class="row"><input id="filter" class="txt" placeholder="Search channel name or ServiceID…"></div>
-
-  <div class="row"><div id="count"></div></div>
-  <div class="row"><div id="list"></div></div>
-
-  <div class="row"><button class="btn tiny" id="btnShowDebug">Show debug</button></div>
-  <div class="row"><div id="debug" class="mono" style="display:none"></div></div>
+  <div id="debug" style="display:none;white-space:pre-wrap;background:#111;padding:10px;margin:10px;max-height:20vh;overflow:auto;"></div>
 
 <script>
 (function(){
-  function getIp(){ try{ return NativeBridge.getStbIp(); }catch(e){ return ""; } }
-  function setIp(ip){ try{ NativeBridge.setStbIp(ip); }catch(e){} }
-  function renderIp(){ var s=getIp(); document.getElementById('ip').textContent = s?("Connected to: "+s):"Not connected"; }
-  renderIp();
+  const ipBox=document.getElementById('ip');
+  const list=document.getElementById('list');
+  const debugBox=document.getElementById('debug');
 
-  function deviceRow(ip, name){
-    var div=document.createElement('div'); div.className='device';
-    var left=document.createElement('div'); left.textContent=(name||'STB')+" ("+ip+")";
-    var btn=document.createElement('button'); btn.className='btn tiny'; btn.textContent='Use this';
-    btn.onclick=function(){ setIp(ip); alert("Using "+ip); renderIp(); };
-    div.appendChild(left); div.appendChild(btn); return div;
+  function getIp(){try{return NativeBridge.getStbIp();}catch(e){return"";}}
+  function setIp(ip){try{NativeBridge.setStbIp(ip);}catch(e){} ipBox.textContent=ip;}
+
+  ipBox.textContent=getIp();
+
+  function renderChannels(arr){
+    list.innerHTML='';
+    arr.forEach(ch=>{
+      const div=document.createElement('div'); div.className='item';
+      const name=document.createElement('div'); name.className='name'; name.textContent=`${ch.name} [${ch.id}]`;
+      const play=document.createElement('button'); play.className='btn'; play.textContent='Play';
+      play.onclick=()=>{try{NativeBridge.openInVlc(ch.url);}catch(e){}};
+      play.setAttribute('tabindex','0'); // make D-pad focusable
+      div.appendChild(name); div.appendChild(play);
+      list.appendChild(div);
+    });
   }
 
-  document.getElementById('btnChangeIp').onclick=function(){
-    var cur=getIp()||""; var ip=prompt("Enter STB IP",cur); if(ip){ setIp(ip); renderIp(); }
-  };
-
-  document.getElementById('btnScan').onclick=function(){
-    var box=document.getElementById('devices'); box.textContent='Scanning…';
+  document.getElementById('btnAuto').onclick=()=>{
     try{
-      var json = NativeBridge.discoverUdp25860(3000);
-      var arr=[]; try{ arr=JSON.parse(json) }catch(e){}
-      box.innerHTML='';
-      if(arr.length){ arr.forEach(it=> box.appendChild(deviceRow(it.ip,it.name))); }
-      else { box.textContent='No devices found.'; }
-    }catch(e){ box.textContent='Scan failed.'; }
+      const res=NativeBridge.discoverUdp25860(3000);
+      const arr=JSON.parse(res);
+      if(arr.length){setIp(arr[0].ip); alert("Found STB: "+arr[0].ip);}
+      else alert("No STB found");
+    }catch(e){alert("Auto-detect failed");}
   };
 
-  document.getElementById('btnPlayById').onclick=function(){
-    var id=(document.getElementById('chanId').value||"").trim();
-    if(!id) return alert("Enter an ID"); try{ NativeBridge.openChannelById(id); }catch(e){}
+  document.getElementById('btnChange').onclick=()=>{
+    const cur=getIp(); const ip=prompt("Enter STB IP",cur);
+    if(ip){setIp(ip);alert("Saved: "+ip);}
   };
 
-  function row(name,id,url){
-    var div=document.createElement('div'); div.className='item';
-    var left=document.createElement('div'); left.className='name'; left.textContent=name+"  ["+id+"]";
-    var play=document.createElement('button'); play.className='btn tiny'; play.textContent='Play';
-    play.onclick=function(){ try{ NativeBridge.openInVlc(url) }catch(e){} };
-    div.appendChild(left); div.appendChild(play); return div;
-  }
-  function render(list){
-    var listDiv=document.getElementById('list'); listDiv.innerHTML='';
-    document.getElementById('count').textContent="Channels: "+list.length;
-    list.forEach(it=> listDiv.appendChild(row(it.name||("Channel "+it.id), it.id, it.url)));
-  }
-
-  let channels = [];
-  document.getElementById('btnFetch').onclick=function(){
-    if(!getIp()) { alert("Set STB IP first (Scan or Change IP)."); return; }
-    channels = [];
-    document.getElementById('count').textContent = "Fetching…";
+  document.getElementById('btnFetch').onclick=()=>{
     try{
-      var json = NativeBridge.fetchChannelsFromStb();
-      try { channels = JSON.parse(json) } catch(e) { channels = [] }
-      render(channels);
-      if (!channels.length) {
-        alert("No channels parsed. Open Debug to inspect.");
-      }
-    }catch(e){ alert("Fetch failed."); }
+      const json=NativeBridge.fetchChannelsFromStb();
+      const arr=JSON.parse(json);
+      renderChannels(arr);
+      if(arr.length===0) alert("No channels parsed.\nCheck debug.");
+    }catch(e){alert("Fetch failed");}
   };
 
-  document.getElementById('btnShowDebug').onclick=function(){
-    var box=document.getElementById('debug');
-    box.style.display='block';
-    try{ box.textContent = NativeBridge.getLastDebug(); }catch(e){ box.textContent="(no debug)"; }
-  };
-
-  document.getElementById('filter').oninput=function(){
-    var q=this.value.toLowerCase().trim();
-    if(!q) return render(channels);
-    var f=channels.filter(c =>
-      (c.name||"").toLowerCase().includes(q) || (c.id||"").toLowerCase().includes(q)
-    );
-    render(f);
+  document.getElementById('btnDebug').onclick=()=>{
+    debugBox.style.display='block';
+    debugBox.textContent=NativeBridge.getLastDebug();
   };
 })();
 </script>
