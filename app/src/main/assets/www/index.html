@@ -98,24 +98,36 @@
     arr.forEach(it => list.appendChild(row(it.name||'Channel', it.id||'', it.url)));
   }
 
+  // === Local fallback Astra channels ===
+  async function loadLocalChannels() {
+    try {
+      const res = await fetch("channels_data.json");
+      const data = await res.json();
+      const stbIp = getIp();
+      data.forEach(ch => ch.url = ch.url.replace("<STB-IP>", stbIp || "192.168.1.206"));
+      renderList(data);
+      document.getElementById('fetchInfo').textContent = "Loaded Astra 19.2°E local channels";
+    } catch (e) {
+      console.error("Local channel load failed", e);
+      alert("Failed to load local channel list.");
+    }
+  }
+
+  // === Fetch button override ===
   document.getElementById('btnFetch').onclick = function(){
-    document.getElementById('fetchInfo').textContent = "Requesting...";
+    document.getElementById('fetchInfo').textContent = "Requesting STB...";
     setTimeout(function(){
       try{
         var json = NativeBridge.fetchChannelsFromStb();
         var arr = []; try { arr = JSON.parse(json); } catch(e){}
-        renderList(arr);
         if (arr.length) {
-          document.getElementById('fetchInfo').textContent = "OK";
+          renderList(arr);
+          document.getElementById('fetchInfo').textContent = "STB OK";
         } else {
-          document.getElementById('fetchInfo').textContent = "No channels (see Debug)";
-          document.getElementById('debug').style.display='block';
-          document.getElementById('debug').textContent = NativeBridge.getLastDebug();
-          alert("Still empty.\nClose the PC app if it’s running and try again.\nDebug visible below.");
+          loadLocalChannels();
         }
       }catch(e){
-        document.getElementById('fetchInfo').textContent = "Failed";
-        alert("Fetch failed.");
+        loadLocalChannels();
       }
     }, 10);
   };
