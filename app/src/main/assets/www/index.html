@@ -17,6 +17,7 @@
   .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%}
   input.txt{min-width:360px;padding:10px;border-radius:6px;border:1px solid #999}
   .device{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#e8f0ff;margin:6px 0;border-radius:6px;width:92%;max-width:1000px}
+  .mono{font-family:monospace;font-size:12px;color:#333}
 </style>
 </head>
 <body>
@@ -34,18 +35,19 @@
     <button class="btn" data-key="15">3</button>
   </div>
 
-  <!-- Play by ID -->
+  <!-- Fetch channels directly from STB control port -->
+  <div class="row">
+    <button class="btn" id="btnFetch">Fetch channels from STB</button>
+    <span id="fetchInfo" class="mono" style="margin:10px;"></span>
+  </div>
+
+  <!-- Play by ID (still handy) -->
   <div class="row">
     <input id="chanId" class="txt" placeholder="Channel ID (e.g., 22621080)">
     <button class="btn" id="btnPlayById">Play in VLC</button>
   </div>
 
-  <!-- Playlist -->
-  <div class="row">
-    <input id="plist" class="txt" placeholder="Playlist URL (auto-tries best path on :8085)">
-    <button class="btn" id="btnFindPl">Find playlist</button>
-    <button class="btn" id="btnLoad">Load channels</button>
-  </div>
+  <!-- Result list -->
   <div class="row"><div id="chanCount" style="margin:6px 0;"></div></div>
   <div class="row"><div id="list"></div></div>
 
@@ -65,13 +67,6 @@
   function renderIp(){
     var s = getIp();
     document.getElementById('ip').textContent = s ? ("Current STB IP: "+s) : "No STB IP set";
-    try{
-      var el = document.getElementById('plist');
-      if (el && (!el.value || !el.value.trim())) {
-        var best = NativeBridge.findPlaylistForSavedIp();
-        el.value = best || NativeBridge.defaultPlaylistUrl();
-      }
-    }catch(e){}
   }
   document.getElementById('changeIp').onclick = function(){
     var cur = getIp() || "";
@@ -87,7 +82,7 @@
     try{ NativeBridge.openChannelById(id); }catch(e){}
   };
 
-  // Playlist loader
+  // List rendering
   function row(name, id, url){
     var div = document.createElement('div'); div.className='item';
     var left = document.createElement('div'); left.className='name';
@@ -97,47 +92,36 @@
     div.appendChild(left); div.appendChild(play);
     return div;
   }
-
-  function loadListFrom(url){
-    try{
-      var data = JSON.parse(NativeBridge.fetchM3U(url));
-      var list = document.getElementById('list'); list.innerHTML='';
-      document.getElementById('chanCount').textContent = "Channels: " + data.length;
-      data.forEach(it => list.appendChild(row(it.name||'Channel', it.id||'', it.url)));
-      if (!data.length) alert("No channels found at:\n"+url+"\nTry Find playlist, or Play by Channel ID.");
-    }catch(e){
-      alert("Failed to load playlist.");
-    }
+  function renderList(arr){
+    var list = document.getElementById('list'); list.innerHTML='';
+    document.getElementById('chanCount').textContent = "Channels: " + arr.length;
+    arr.forEach(it => list.appendChild(row(it.name||'Channel', it.id||'', it.url)));
   }
 
-  document.getElementById('btnLoad').onclick = function(){
-    var url = (document.getElementById('plist').value||"").trim();
-    if(!url){ alert("Enter or find a playlist URL first."); return; }
-    loadListFrom(url);
-  };
-
-  // Find playlist (robust)
-  document.getElementById('btnFindPl').onclick = function(){
-    try{
-      var best = NativeBridge.findPlaylistForSavedIp();
-      if (best){
-        document.getElementById('plist').value = best;
-        alert("Found playlist:\n"+best);
-        loadListFrom(best);
-      }else{
-        alert("No playlist page with links found on :8085.\nYou can still Play by Channel ID.");
+  // Fetch channels via control protocol (TV -> STB direct)
+  document.getElementById('btnFetch').onclick = function(){
+    document.getElementById('fetchInfo').textContent = "Requesting...";
+    setTimeout(function(){ // let UI update
+      try{
+        var json = NativeBridge.fetchChannelsFromStb();
+        var arr = []; try { arr = JSON.parse(json); } catch(e){}
+        renderList(arr);
+        document.getElementById('fetchInfo').textContent = arr.length ? "OK" : "No channels (will refine)";
+        if (!arr.length) alert("No channels returned yet. If your PC app is open, close it and try again.\nIf still empty, tell me and we’ll add the decrypt step.");
+      }catch(e){
+        document.getElementById('fetchInfo').textContent = "Failed";
+        alert("Fetch failed.");
       }
-    }catch(e){ alert("Failed to check playlist."); }
+    }, 10);
   };
 
-  // Auto-detect: UDP first, then HTTP
-  function deviceRow(ip, name, playlist){
+  // Auto-detect: UDP first, then (optional) HTTP fallback
+  function deviceRow(ip, name){
     var div = document.createElement('div'); div.className='device';
     var left = document.createElement('div'); left.textContent = (name||'STB') + "  ("+ip+")";
     var btn = document.createElement('button'); btn.className='btn tiny'; btn.textContent='Connect';
     btn.onclick = function(){
       setIp(ip);
-      if (playlist) document.getElementById('plist').value = playlist;
       alert("Connected to: "+ip);
       renderIp();
     };
@@ -150,20 +134,9 @@
     try{
       var udpJson = NativeBridge.discoverUdp25860(3000);
       var arr = []; try { arr = JSON.parse(udpJson); } catch(e){}
-      if (arr.length) {
-        box.innerHTML = '';
-        arr.forEach(it => box.appendChild(deviceRow(it.ip, it.name, it.playlist)));
-        return;
-      }
-    }catch(e){}
-    // fallback
-    box.innerHTML = 'Scanning LAN for :8085...';
-    try{
-      var json = NativeBridge.discoverStb(256);
-      var arr2 = []; try { arr2 = JSON.parse(json); } catch(e){}
       box.innerHTML = '';
-      if (!arr2.length) { box.textContent = 'No devices found. Make sure the TV and STB are on the same network.'; return; }
-      arr2.forEach(it => box.appendChild(deviceRow(it.ip, it.name, it.playlist)));
+      if (arr.length) { arr.forEach(it => box.appendChild(deviceRow(it.ip, it.name))); return; }
+      box.textContent = 'No devices via UDP.';
     }catch(e){
       box.textContent = 'Scan failed.';
     }
@@ -172,3 +145,4 @@
 </script>
 </body>
 </html>
+
