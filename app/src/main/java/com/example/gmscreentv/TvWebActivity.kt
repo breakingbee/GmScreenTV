@@ -2,7 +2,9 @@ package com.example.gmscreentv
 
 import android.app.Activity
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -70,9 +72,7 @@ class TvWebActivity : Activity() {
         @JavascriptInterface fun setStbIp(ip: String) { prefs.edit().putString("stb_ip", ip.trim()).apply() }
         @JavascriptInterface fun getStbIp(): String = prefs.getString("stb_ip", "") ?: ""
 
-        // ===== REMOTE KEY =====
-        @JavascriptInterface
-        fun sendRcuKey(key: String) {
+        @JavascriptInterface fun sendRcuKey(key: String) {
             val ip = getStbIp()
             if (ip.isEmpty()) { promptForIp(); return }
             val url = "http://$ip/?RcuKey=$key"
@@ -81,9 +81,8 @@ class TvWebActivity : Activity() {
             }
         }
 
-        // ===== VLC OPENERS =====
-        @JavascriptInterface
-        fun openInVlc(url: String) {
+        // ===== PLAYBACK (VLC only) =====
+        @JavascriptInterface fun openInVlc(url: String) {
             try {
                 val i = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
                     setDataAndType(android.net.Uri.parse(url), "video/*")
@@ -109,6 +108,10 @@ class TvWebActivity : Activity() {
             openInVlc("http://$ip:8085/player.$id")
         }
 
+        // ===== MY CHANNELS (optional, local) =====
+        @JavascriptInterface fun saveMyChannels(json: String) { prefs.edit().putString("my_channels", json).apply() }
+        @JavascriptInterface fun loadMyChannels(): String = prefs.getString("my_channels", "[]") ?: "[]"
+
         // ===== AUTO-DETECT (UDP 25860) =====
         @JavascriptInterface
         fun discoverUdp25860(timeoutMs: Int): String {
@@ -132,7 +135,9 @@ class TvWebActivity : Activity() {
                     } catch (_: Exception) { break }
                 }
             } catch (_: Exception) {
-            } finally { try { socket?.close() } catch (_: Exception) {} }
+            } finally {
+                try { socket?.close() } catch (_: Exception) {}
+            }
 
             val sb = StringBuilder("[")
             var first = true
@@ -140,89 +145,98 @@ class TvWebActivity : Activity() {
                 if (!first) sb.append(',')
                 first = false
                 sb.append("{\"ip\":").append(JSONObject.quote(ip))
-                    .append(",\"name\":\"STB broadcast\",\"playlist\":\"\"}")
+                    .append(",\"name\":\"STB broadcast\"")
+                    .append(",\"playlist\":\"\"}")
             }
             sb.append("]")
             return sb.toString()
         }
 
-        // ========= NEW: FETCH VIA 4113->8888 (long listen) =========
+        // ========= CONTROL PROTOCOL =========
+        // Exact sequence you captured:
+        // 1) XML login (request=998) inside Start/End envelope
+        // 2) JSON requests (all Start/End):
+        //    23, 16, 20, 12, 24
+        //    many windows: {"request":"0","FromIndex":"A","ToIndex":"B"}
+        //    22, 1012, 20
+        // We keep the socket open and read GCDH frames; inflate and parse JSON arrays.
+
         @JavascriptInterface
         fun fetchChannelsFromStb(): String {
             val ip = getStbIp().trim()
             if (ip.isEmpty()) return "[]"
 
-            val dbg = StringBuilder()
+            // PC logs show server on 8888 for this phase
+            val port = 8888
 
-            // 1) XML login on 4113 (like the PC app does)
-            if (!loginOver4113(ip, 4113, dbg)) {
-                prefs.edit().putString("last_debug", dbg.toString().take(12000)).apply()
+            val debug = StringBuilder()
+            try {
+                val frames = mutableListOf<ByteArray>()
+
+                // (1) XML login
+                frames += xmlLoginFrame()
+
+                // (2) Fixed JSON control requests in same order
+                frames += jsonFrame("""{"request":"23"}""")
+                frames += jsonFrame("""{"request":"16"}""")
+                frames += jsonFrame("""{"request":"20"}""")
+                frames += jsonFrame("""{"request":"12"}""")
+                frames += jsonFrame("""{"request":"24"}""")
+
+                // windows 0..1999 step 100 (0-99, 100-199, ...)
+                for (a in 0..1999 step 100) {
+                    val b = a + 99
+                    frames += jsonFrame("""{"FromIndex":"$a","ToIndex":"$b","request":"0"}""")
+                }
+
+                frames += jsonFrame("""{"request":"22"}""")
+                frames += jsonFrame("""{"request":"1012"}""")
+                frames += jsonFrame("""{"request":"20"}""")
+
+                val res = talkToControl(ip, port, frames, debug)
+                prefs.edit().putString("last_debug", debug.toString().take(15000)).apply()
+                return res.toString()
+            } catch (e: Exception) {
+                debug.append("fetch error: ${e.message}\n")
+                prefs.edit().putString("last_debug", debug.toString().take(15000)).apply()
                 return "[]"
             }
-
-            // 2) Ask over 8888 for the channel windows; listen longer
-            val windows = arrayOf(
-                0 to 199, 200 to 399, 400 to 599, 600 to 799,
-                800 to 999, 1000 to 1199, 1200 to 1399, 1400 to 1599
-            )
-
-            val seq = mutableListOf<ByteArray>()
-            seq += jsonFrame("""{"request":"1012"}""")
-            seq += jsonFrame("""{"request":"1007","IsFavList":"0","SelectListType":"0"}""")
-            for ((a,b) in windows) {
-                seq += jsonFrame("""{"request":"0","FromIndex":"$a","ToIndex":"$b"}""")
-            }
-            seq += jsonFrame("""{"request":"26"}""")
-
-            val chunks = talkToControlAll(ip, 8888, seq, dbg, 12_000L)   // long listen
-            val arr = parseChannelsFromTexts(chunks, ip, dbg)
-
-            prefs.edit().putString("last_debug", dbg.toString().take(12000)).apply()
-            return arr.toString()
         }
 
-        // ========= NEW: CURRENT URL VIA 4113->8888 (1009) =========
         @JavascriptInterface
-        fun getCurrentPlayUrl(): String {
-            val ip = getStbIp().trim()
-            if (ip.isEmpty()) return ""
-            val dbg = StringBuilder()
+        fun getLastDebug(): String = prefs.getString("last_debug", "") ?: ""
 
-            if (!loginOver4113(ip, 4113, dbg)) {
-                prefs.edit().putString("last_debug", dbg.toString().take(12000)).apply()
-                return ""
-            }
+        // ===== Helpers =====
 
-            val frames = listOf(
-                jsonFrame("""{"request":"1012"}"""),
-                jsonFrame("""{"request":"1009"}""")
-            )
-            val chunks = talkToControlAll(ip, 8888, frames, dbg, 3500L)
-            prefs.edit().putString("last_debug", dbg.toString().take(12000)).apply()
-
-            for ((type, bytes) in chunks) {
-                val t = String(bytes, Charsets.UTF_8).trim()
-                if (type == 1009 || type == 0 || type == 12) {
-                    if (t.startsWith("[")) {
-                        try {
-                            val arr = JSONArray(t)
-                            val obj = arr.optJSONObject(0)
-                            if (obj?.optString("success") == "1") {
-                                val url = obj.optString("url")
-                                if (url.startsWith("http")) return url
-                            }
-                        } catch (_: Exception) {}
-                    }
-                }
-            }
-            return ""
+        private fun deviceLabel(): String {
+            val model = Build.MODEL ?: "Android"
+            return model.trim().ifEmpty { "Android" }
         }
 
-        @JavascriptInterface fun getLastDebug(): String = prefs.getString("last_debug", "") ?: ""
+        private fun stableUuid(ctx: Context): String {
+            // Stable per device install (best effort)
+            val androidId = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ANDROID_ID)
+            val base = (androidId ?: "00000000") + "-" + Build.SERIAL
+            return UUID.nameUUIDFromBytes(base.toByteArray(Charsets.UTF_8)).toString()
+        }
 
-        // ---------- framing helpers ----------
+        private fun xmlLoginFrame(): ByteArray {
+            // Matches your capture: request="998" with <data>DeviceName</data> and <uuid>...-02:00:00:00:00:00</uuid>
+            val uuid = stableUuid(ctx) + "-02:00:00:00:00:00"
+            val xml = "<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>" +
+                    "<Command request=\"998\"><data>${escapeXml(deviceLabel())}</data><uuid>$uuid</uuid></Command>"
+            return startEndFrame(xml.toByteArray(Charsets.UTF_8))
+        }
+
+        private fun escapeXml(s: String): String =
+            s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+
         private fun jsonFrame(json: String): ByteArray {
             val body = json.trim().toByteArray(Charsets.UTF_8)
+            return startEndFrame(body)
+        }
+
+        private fun startEndFrame(body: ByteArray): ByteArray {
             val len = body.size
             val header = "Start" + String.format("%07d", len) + "End"
             return header.toByteArray(Charsets.UTF_8) + body
@@ -241,7 +255,7 @@ class TvWebActivity : Activity() {
             return out
         }
 
-        private fun beInt(b: ByteArray, o: Int): Int {
+        private fun leInt(b: ByteArray, o: Int): Int {
             return ((b[o+3].toInt() and 0xFF) shl 24) or
                    ((b[o+2].toInt() and 0xFF) shl 16) or
                    ((b[o+1].toInt() and 0xFF) shl 8)  or
@@ -255,30 +269,31 @@ class TvWebActivity : Activity() {
                 if (`in`.available() < 16) { try { Thread.sleep(20) } catch (_: Exception) {}; continue }
                 val hdr = readExact(`in`, 16) ?: break
                 if (!(hdr[0]=='G'.code.toByte() && hdr[1]=='C'.code.toByte() && hdr[2]=='D'.code.toByte() && hdr[3]=='H'.code.toByte())) {
-                    debug.append("Non-GCDH header\n"); break
+                    debug.append("Non-GCDH header: ${hdr.copyOf(4).toString(Charsets.US_ASCII)}\n")
+                    break
                 }
-                val payloadLen = beInt(hdr, 4)
-                val msgType   = beInt(hdr, 8)
-                val extra     = beInt(hdr,12)
+                val payloadLen = leInt(hdr, 4)
+                val msgType   = leInt(hdr, 8)
+                val extra     = leInt(hdr,12)
                 debug.append("GCDH frame: len=$payloadLen type=$msgType extra=$extra\n")
-
-                val comp = if (payloadLen <= 0) ByteArray(0) else readExact(`in`, payloadLen) ?: break
+                if (payloadLen <= 0 || payloadLen > 8*1024*1024) {
+                    debug.append("Aborting: bad len\n"); break
+                }
+                val comp = readExact(`in`, payloadLen) ?: break
                 val inflated = tryInflate(comp) ?: comp
                 chunks += msgType to inflated
-                debug.append("-- type=$msgType textLen=${inflated.size}\n")
             }
             return chunks
         }
 
         private fun tryInflate(data: ByteArray): ByteArray? {
             return try {
-                if (data.isEmpty()) return ByteArray(0)
                 val inf = Inflater()
                 inf.setInput(data)
                 val out = ByteArray(2 * 1024 * 1024)
                 val n = inf.inflate(out)
                 inf.end()
-                if (n >= 0) out.copyOf(n) else null
+                if (n > 0) out.copyOf(n) else null
             } catch (_: Exception) { null }
         }
 
@@ -287,93 +302,96 @@ class TvWebActivity : Activity() {
             val seen = HashSet<String>()
             for ((type, bytes) in all) {
                 val text = String(bytes, Charsets.UTF_8)
-                // try JSON array of channel objects
+                debug.append("-- type=$type textLen=${text.length}\n")
+                // Try JSON array of service objects
                 try {
-                    val trimmed = text.trim()
-                    if (trimmed.startsWith("[")) {
-                        val arr = JSONArray(trimmed)
+                    val t = text.trim()
+                    if (t.startsWith("[")) {
+                        val arr = JSONArray(t)
                         for (i in 0 until arr.length()) {
                             val o = arr.optJSONObject(i) ?: continue
                             val name = o.optString("ServiceName", o.optString("name",""))
                             val id = o.optString("ServiceID", o.optString("id", o.optString("chan_id","")))
-                            val idx = o.optString("ServiceIndex", o.optString("index",""))
                             if (id.isNotEmpty() && seen.add(id)) {
-                                out.put(
-                                    JSONObject()
+                                out.put(JSONObject()
+                                    .put("name", if (name.isNotEmpty()) name else "Channel $id")
+                                    .put("id", id)
+                                    .put("url", "http://$ip:8085/player.$id"))
+                            }
+                        }
+                        continue
+                    } else if (t.startsWith("{")) {
+                        val obj = JSONObject(t)
+                        val keys = arrayOf("channels","list","items","programs","array")
+                        for (k in keys) if (obj.has(k)) {
+                            val arr = obj.optJSONArray(k) ?: continue
+                            for (i in 0 until arr.length()) {
+                                val o = arr.optJSONObject(i) ?: continue
+                                val name = o.optString("ServiceName", o.optString("name",""))
+                                val id = o.optString("ServiceID", o.optString("id", o.optString("chan_id","")))
+                                if (id.isNotEmpty() && seen.add(id)) {
+                                    out.put(JSONObject()
                                         .put("name", if (name.isNotEmpty()) name else "Channel $id")
                                         .put("id", id)
-                                        .put("idx", idx)
-                                        .put("url", "http://$ip:8085/player.$id")
-                                )
+                                        .put("url", "http://$ip:8085/player.$id"))
+                                }
                             }
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) { /* fall through */ }
 
-                // fallback: scrape player.ID patterns
+                // Fallback: grep for player.<ID>
                 Regex("""player\.([0-9]+)""").findAll(text).forEach { m ->
                     val id = m.groupValues[1]
                     if (seen.add(id)) {
-                        out.put(JSONObject().put("name", "Channel $id").put("id", id).put("url", "http://$ip:8085/player.$id"))
+                        out.put(JSONObject().put("name", "Channel $id")
+                            .put("id", id)
+                            .put("url", "http://$ip:8085/player.$id"))
                     }
                 }
             }
             return out
         }
 
-        // ---- sockets ----
-        private fun talkToControlAll(
-            ip: String,
-            port: Int,
-            frames: List<ByteArray>,
-            debug: StringBuilder,
-            listenMs: Long
-        ): List<Pair<Int,ByteArray>> {
+        private fun talkToControl(ip: String, port: Int, frames: List<ByteArray>, debug: StringBuilder): JSONArray {
             var sock: Socket? = null
             return try {
                 debug.append("Connecting $ip:$port\n")
-                sock = Socket(ip, port).apply { soTimeout = 3500 }
+                sock = Socket(ip, port).apply { soTimeout = 4000 }
                 val out: OutputStream = sock.getOutputStream()
                 val `in`: InputStream = sock.getInputStream()
-                for (f in frames) { out.write(f); out.flush(); try { Thread.sleep(50) } catch (_: Exception) {} }
-                readGcdhFrames(`in`, listenMs, debug)
+
+                // send frames spaced out like the PC app
+                for (f in frames) {
+                    out.write(f)
+                    out.flush()
+                    try { Thread.sleep(40) } catch (_: Exception) {}
+                }
+
+                // read for a while to accumulate multiple lists
+                val framesIn = readGcdhFrames(`in`, totalWaitMs = 4500L, debug)
+                if (framesIn.isEmpty()) {
+                    debug.append("No GCDH frames read on $port\n")
+                    return JSONArray()
+                }
+                val chans = parseChannelsFromTexts(framesIn, ip, debug)
+                if (chans.length() == 0) debug.append("Parsed 0 channels on $port\n")
+                chans
             } catch (e: Exception) {
                 debug.append("Error $ip:$port -> ${e.message}\n")
-                emptyList()
-            } finally { try { sock?.close() } catch (_: Exception) {} }
+                JSONArray()
+            } finally {
+                try { sock?.close() } catch (_: Exception) {}
+            }
         }
 
-        private fun loginOver4113(ip: String, port: Int, debug: StringBuilder): Boolean {
-            var sock: Socket? = null
-            return try {
-                debug.append("Connecting $ip:$port (XML login)\n")
-                sock = Socket(ip, port).apply { soTimeout = 3000 }
-                val out: OutputStream = sock.getOutputStream()
-                val `in`: InputStream = sock.getInputStream()
-
-                val uuid = UUID.randomUUID().toString()
-                val xml = "<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>" +
-                        "<Command request=\"998\"><uuid>$uuid</uuid><data>Future</data></Command>"
-                out.write(xml.toByteArray(Charsets.UTF_8))
-                out.flush()
-                Thread.sleep(80)
-
-                val buf = ByteArray(256)
-                val n = try { `in`.read(buf) } catch (_: Exception) { -1 }
-                debug.append("XML login reply bytes=$n\n")
-                n > 0
-            } catch (e: Exception) {
-                debug.append("XML login error: ${e.message}\n")
-                false
-            } finally { try { sock?.close() } catch (_: Exception) {} }
-        }
-
-        // ===== HTTP SWEEP (optional) =====
+        // ===== HTTP SWEEP FALLBACK (unchanged) =====
         @JavascriptInterface
         fun discoverStb(maxHosts: Int): String {
             val results = mutableListOf<Map<String,String>>()
             val prefix = localSubnetPrefix() ?: return "[]"
             val total = min(maxHosts.coerceAtLeast(1), 254)
+
             fun probe(ip: String): Map<String,String>? {
                 try {
                     http.newCall(Request.Builder().url("http://$ip:8085/").build())
@@ -381,9 +399,13 @@ class TvWebActivity : Activity() {
                 } catch (_: Exception) {}
                 return null
             }
+
             val tasks = (1..254).take(total).map { host ->
                 val ip = "$prefix.$host"
-                Runnable { probe(ip)?.let { synchronized(results){ results += it } } }
+                Runnable {
+                    val hit = probe(ip)
+                    if (hit != null) synchronized(results) { results += hit }
+                }
             }
             tasks.forEach { io.execute(it) }
             try { Thread.sleep(2500) } catch (_: Exception) {}
